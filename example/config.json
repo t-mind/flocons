@@ -1,0 +1,18 @@
+{
+    "namespace": "ns",
+    "zookeeper": "hosts",
+    "node": {
+        "name": "node-1",
+        "port": 5107,
+        "external_address": "http://myNode:5107",
+        "shard": "shard-1"
+    },
+    "storage": {
+        "path": "/tmp/flocons",
+        "max_size": "10G"
+    },
+    "sync": {
+        "data_timeout": "10s",
+        "metadata_timeout": "10s"
+    }
+}
