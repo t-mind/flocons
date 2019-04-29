@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 
 	. "github.com/macq/flocons/pkg/error"
 	"github.com/macq/flocons/pkg/file"
@@ -24,7 +25,7 @@ type Server struct {
 type serverJob struct {
 	writer  http.ResponseWriter
 	request *http.Request
-	result  chan bool
+	barrier *sync.Cond
 }
 
 func NewServer(config *flocons.Config) (*Server, error) {
@@ -45,10 +46,12 @@ func NewServer(config *flocons.Config) (*Server, error) {
 		fileJobs:   make(chan serverJob),
 	}
 	httpHandler.HandleFunc(FILES_PREFIX+"/", func(w http.ResponseWriter, r *http.Request) {
-		result := make(chan bool, 1)
-		server.fileJobs <- serverJob{writer: w, request: r, result: result}
-		<-result
-		close(result)
+		mutex := sync.Mutex{}
+		barrier := sync.NewCond(&mutex)
+		mutex.Lock()
+		server.fileJobs <- serverJob{writer: w, request: r, barrier: barrier}
+		barrier.Wait()
+		mutex.Unlock()
 	})
 	httpHandler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("Served uri " + r.URL.String())
@@ -77,8 +80,10 @@ func (s *Server) waitForFileWork() {
 			if !ok {
 				return // channel closed
 			}
+			job.barrier.L.Lock()
 			s.ServeFile(job.writer, job.request)
-			job.result <- true
+			job.barrier.Broadcast()
+			job.barrier.L.Unlock()
 		}
 	}
 }
