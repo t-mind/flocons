@@ -1,7 +1,6 @@
 package http
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -45,32 +44,39 @@ func NewServer(config *flocons.Config) (*Server, error) {
 		httpServer: httpServer,
 		fileJobs:   make(chan serverJob),
 	}
+	server.start()
+	return &server, nil
+}
+
+func (s *Server) start() {
+	httpHandler, _ := s.httpServer.Handler.(*http.ServeMux)
 	httpHandler.HandleFunc(FILES_PREFIX+"/", func(w http.ResponseWriter, r *http.Request) {
+		logger.Debugf("Handle file request %s on ressource %s\n", r.Method, r.URL.Path)
 		mutex := sync.Mutex{}
 		barrier := sync.NewCond(&mutex)
 		mutex.Lock()
-		server.fileJobs <- serverJob{writer: w, request: r, barrier: barrier}
+		s.fileJobs <- serverJob{writer: w, request: r, barrier: barrier}
 		barrier.Wait()
 		mutex.Unlock()
 	})
 	httpHandler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Served uri " + r.URL.String())
+		logger.Warnf("Unhandled URL request %s\n", r.URL.Path)
 		w.WriteHeader(400)
 	})
 
+	logger.Infoln("Start workers")
 	for i := 0; i < FILE_WORKER_POOL_SIZE; i++ {
 		go func() {
-			server.waitForFileWork()
+			s.waitForFileWork()
 		}()
 	}
 
 	go func() {
-		if httpServer.ListenAndServe(); err != nil {
-			panic(err)
+		logger.Info("Start http server")
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Panicf("Http server failed %s\n", err)
 		}
 	}()
-
-	return &server, nil
 }
 
 func (s *Server) waitForFileWork() {
