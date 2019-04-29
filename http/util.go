@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"time"
 
-	. "github.com/macq/flocons/pkg/error"
-	"github.com/macq/flocons/pkg/file"
+	. "github.com/macq/flocons/error"
+	"github.com/macq/flocons/file"
 )
 
 const FILES_PREFIX string = "/files"

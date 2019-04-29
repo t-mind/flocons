@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/macq/flocons/pkg/file"
+	"github.com/macq/flocons/file"
 )
 
 type FileService interface {

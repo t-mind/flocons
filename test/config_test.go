@@ -3,7 +3,7 @@ package test
 import (
 	"testing"
 
-	"github.com/macq/flocons/pkg/flocons"
+	"github.com/macq/flocons"
 )
 
 func TestSimpleConfig(t *testing.T) {

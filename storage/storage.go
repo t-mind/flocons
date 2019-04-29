@@ -8,8 +8,8 @@ import (
 	"sort"
 	"sync"
 
-	. "github.com/macq/flocons/pkg/error"
-	"github.com/macq/flocons/pkg/flocons"
+	"github.com/macq/flocons"
+	. "github.com/macq/flocons/error"
 
 	"github.com/golang/groupcache/lru"
 )
@@ -81,7 +81,7 @@ func NewStorage(config *flocons.Config) (*Storage, error) {
 }
 
 func (s *Storage) MakeAbsolute(p string) string {
-	if !filepath.IsAbs(p) {
+	if len(p) < len(s.path) || p[:len(s.path)] != p {
 		return filepath.Join(s.path, p)
 	}
 	return p

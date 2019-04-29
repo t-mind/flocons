@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	. "github.com/macq/flocons/pkg/error"
-	"github.com/macq/flocons/pkg/file"
+	. "github.com/macq/flocons/error"
+	"github.com/macq/flocons/file"
 )
 
 type Client struct {

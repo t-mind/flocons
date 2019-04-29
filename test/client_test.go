@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/macq/flocons/pkg/flocons"
-	"github.com/macq/flocons/pkg/http"
+	"github.com/macq/flocons"
+	"github.com/macq/flocons/http"
 )
 
 func initServer(t *testing.T) *http.Server {

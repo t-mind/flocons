@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"sync"
 
-	. "github.com/macq/flocons/pkg/error"
-	"github.com/macq/flocons/pkg/file"
-	"github.com/macq/flocons/pkg/flocons"
-	"github.com/macq/flocons/pkg/storage"
+	"github.com/macq/flocons"
+	. "github.com/macq/flocons/error"
+	"github.com/macq/flocons/file"
+	"github.com/macq/flocons/storage"
 )
 
 const FILE_WORKER_POOL_SIZE int = 10
