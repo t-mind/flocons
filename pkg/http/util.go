@@ -23,13 +23,13 @@ const FILES_PREFIX string = "/files"
 func errorToHttpStatus(err error) int {
 	switch {
 	case os.IsNotExist(err):
-		return 404
+		return http.StatusNotFound
 	case os.IsPermission(err):
-		return 503
-	case os.IsExist(err):
-		return 509
+		return http.StatusForbidden
+	case os.IsExist(err) || IsIsDirError(err) || IsIsNotDirError(err):
+		return http.StatusConflict
 	default:
-		return 500
+		return http.StatusInternalServerError
 	}
 }
 
@@ -47,9 +47,9 @@ func getResponseBodyString(resp *http.Response) string {
 
 func responseToFileInfo(uri *url.URL, resp *http.Response) (os.FileInfo, error) {
 	switch {
-	case resp.StatusCode == 404:
+	case resp.StatusCode == http.StatusNotFound:
 		return nil, NewFileNotFoundError(path.Base(uri.Path))
-	case resp.StatusCode == 500:
+	case resp.StatusCode == http.StatusInternalServerError:
 		return nil, NewInternalError(fmt.Sprintf("%s: %s", resp.Status, getResponseBodyString(resp)))
 	case resp.StatusCode >= 300:
 		return nil, NewHttpError(fmt.Sprintf("%s: %s", resp.Status, getResponseBodyString(resp)), resp.StatusCode)

@@ -14,6 +14,16 @@ func NewIsNotDirError(path string) error {
 	return &os.PathError{Op: "stat", Path: path, Err: syscall.ENOTDIR}
 }
 
+func IsIsDirError(err error) bool {
+	pathError, ok := err.(*os.PathError)
+	return ok && pathError.Err == syscall.EISDIR
+}
+
+func IsIsNotDirError(err error) bool {
+	pathError, ok := err.(*os.PathError)
+	return ok && pathError.Err == syscall.ENOTDIR
+}
+
 type HttpError struct {
 	Status     string
 	StatusCode int
