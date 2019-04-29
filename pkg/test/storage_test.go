@@ -135,7 +135,9 @@ func TestMissingContainer(t *testing.T) {
 	dirPath := ss[0].MakeAbsolute(testDir)
 	files, _ := filepath.Glob(filepath.Join(dirPath, "files*"))
 	for _, f := range files {
-		os.Remove(f)
+		if err := os.Remove(f); err != nil {
+			t.Errorf("Could not remove files %s: %s", f, err)
+		}
 	}
 
 	TestReadFile(t, ss[0], testDir, "testFile3", "")

@@ -77,9 +77,9 @@ func TestConcurrentClients(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(id int) {
+			defer wg.Done()
 			client := initClient(t)
 			defer client.Close()
-			defer wg.Done()
 			fileName := fmt.Sprintf("testFile-%d", id)
 			data := fmt.Sprintf("testData-%d", id)
 			TestCreateFile(t, client, "/testDir", fileName, data)
