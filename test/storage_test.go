@@ -20,7 +20,7 @@ func initStorages(t *testing.T, count int) []*storage.Storage {
 
 	ss := make([]*storage.Storage, count)
 	for i := 0; i < count; i++ {
-		json_config := fmt.Sprintf("{\"node\": {\"name\": \"node-%d\"}, \"storage\": {\"path\": %q}}", i, directory)
+		json_config := fmt.Sprintf(`{"node": {"name": "node-%d"}, "storage": {"path": %q}}`, i, directory)
 		config, err := flocons.NewConfigFromJson([]byte(json_config))
 		if err != nil {
 			t.Errorf("Could not parse config %s: %s", json_config, err)

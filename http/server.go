@@ -64,7 +64,7 @@ func (s *Server) start() {
 		w.WriteHeader(400)
 	})
 
-	logger.Infoln("Start workers")
+	logger.Info("Start workers")
 	for i := 0; i < FILE_WORKER_POOL_SIZE; i++ {
 		go func() {
 			s.waitForFileWork()

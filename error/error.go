@@ -24,6 +24,18 @@ func IsIsNotDirError(err error) bool {
 	return ok && pathError.Err == syscall.ENOTDIR
 }
 
+type ConfigError struct {
+	Message string
+}
+
+func (e *ConfigError) Error() string {
+	return fmt.Sprintf("Config error %s", e.Message)
+}
+
+func NewConfigError(message string) error {
+	return &ConfigError{Message: message}
+}
+
 type HttpError struct {
 	Status     string
 	StatusCode int

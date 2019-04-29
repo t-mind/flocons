@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/macq/flocons"
@@ -81,7 +82,7 @@ func NewStorage(config *flocons.Config) (*Storage, error) {
 }
 
 func (s *Storage) MakeAbsolute(p string) string {
-	if len(p) < len(s.path) || p[:len(s.path)] != p {
+	if !strings.HasPrefix(p, s.path) {
 		return filepath.Join(s.path, p)
 	}
 	return p
