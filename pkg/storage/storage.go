@@ -24,15 +24,15 @@ type Storage struct {
 }
 
 type DirectoryCacheEntry struct {
-	writeContainer **RegularFileContainer
+	writeContainer *RegularFileContainer
 	containers     map[string]*RegularFileContainer
-	updateMutex    *sync.Mutex
+	updateMutex    sync.Mutex
 }
 
 type regularFileContainerWalker struct {
 	storage    *Storage
 	directory  string
-	cacheEntry DirectoryCacheEntry
+	cacheEntry *DirectoryCacheEntry
 
 	cacheKeys    []string
 	currentIndex int
@@ -53,11 +53,11 @@ func NewStorage(config *flocons.Config) (*Storage, error) {
 		updateCacheMutex: &sync.Mutex{},
 	}
 	s.directoryCache.OnEvicted = func(key lru.Key, value interface{}) {
-		cacheEntry, _ := value.(DirectoryCacheEntry)
+		cacheEntry, _ := value.(*DirectoryCacheEntry)
 		cacheEntry.updateMutex.Lock()
 		defer cacheEntry.updateMutex.Unlock()
-		if (*cacheEntry.writeContainer) != nil {
-			(*cacheEntry.writeContainer).Close()
+		if cacheEntry.writeContainer != nil {
+			cacheEntry.writeContainer.Close()
 		}
 	}
 
@@ -164,29 +164,29 @@ func (s *Storage) GetFile(p string) (os.FileInfo, error) {
 	return nil, ferr
 }
 
-func (s *Storage) getDirectoryCacheEntry(directory string) DirectoryCacheEntry {
+func (s *Storage) getDirectoryCacheEntry(directory string) *DirectoryCacheEntry {
 	s.updateCacheMutex.Lock()
 	defer s.updateCacheMutex.Unlock()
 
-	var cacheEntry DirectoryCacheEntry
+	var cacheEntry *DirectoryCacheEntry
 	if rawEntry, found := s.directoryCache.Get(directory); found {
-		cacheEntry, _ = rawEntry.(DirectoryCacheEntry)
+		cacheEntry, _ = rawEntry.(*DirectoryCacheEntry)
 	} else {
 		var nullContainer *RegularFileContainer
-		cacheEntry = DirectoryCacheEntry{
+		cacheEntry = &DirectoryCacheEntry{
 			containers:     make(map[string]*RegularFileContainer),
-			writeContainer: &nullContainer,
-			updateMutex:    &sync.Mutex{},
+			writeContainer: nullContainer,
+			updateMutex:    sync.Mutex{},
 		}
 		s.directoryCache.Add(directory, cacheEntry)
 	}
 	return cacheEntry
 }
 
-func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry DirectoryCacheEntry) {
+func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry *DirectoryCacheEntry) {
 	cacheEntry.updateMutex.Lock()
 	defer cacheEntry.updateMutex.Unlock()
-	if *cacheEntry.writeContainer == nil {
+	if cacheEntry.writeContainer == nil {
 		var writeContainer *RegularFileContainer
 		for _, container := range cacheEntry.containers {
 			if container.Node == s.config.Node.Name && (writeContainer == nil || writeContainer.Number < container.Number) {
@@ -197,7 +197,7 @@ func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry Di
 			name := NewRegularFileContainerName(s.config.Node.Name, 1)
 			writeContainer, _ = NewRegularFileContainer(s.MakeAbsolute(directory), name, s.config, nil)
 			cacheEntry.containers[name] = writeContainer
-			*cacheEntry.writeContainer = writeContainer
+			cacheEntry.writeContainer = writeContainer
 		}
 	}
 }
