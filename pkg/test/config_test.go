@@ -1,11 +1,13 @@
-package flocons
+package test
 
 import (
 	"testing"
+
+	"github.com/macq/flocons/pkg/flocons"
 )
 
 func TestSimpleConfig(t *testing.T) {
-	config, err := NewConfigFromJson([]byte("{\"namespace\": \"flocons\" }"))
+	config, err := flocons.NewConfigFromJson([]byte("{\"namespace\": \"flocons\" }"))
 	if err != nil {
 		t.Errorf("Could not parse config %s", err)
 	} else {

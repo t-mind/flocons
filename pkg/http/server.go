@@ -186,6 +186,11 @@ func (s *Server) Close() {
 	close(s.fileJobs)
 }
 
+func (s *Server) CloseAndDestroyStorage() error {
+	s.Close()
+	return s.storage.Destroy()
+}
+
 func returnError(err error, w http.ResponseWriter) {
 	w.WriteHeader(errorToHttpStatus(err))
 	w.Write([]byte(err.Error()))

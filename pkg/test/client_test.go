@@ -1,4 +1,4 @@
-package http
+package test
 
 import (
 	"fmt"
@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/macq/flocons/pkg/flocons"
-	"github.com/macq/flocons/pkg/test"
+	"github.com/macq/flocons/pkg/http"
 )
 
-func initServer(t *testing.T) *Server {
+func initServer(t *testing.T) *http.Server {
 	directory, err := ioutil.TempDir(os.TempDir(), "flocons-test")
 	if err != nil {
 		panic(err)
@@ -24,7 +24,7 @@ func initServer(t *testing.T) *Server {
 		t.FailNow()
 	}
 
-	server, err := NewServer(config)
+	server, err := http.NewServer(config)
 	if err != nil {
 		t.Errorf("Could instantiate server: %s", err)
 		t.FailNow()
@@ -32,8 +32,8 @@ func initServer(t *testing.T) *Server {
 	return server
 }
 
-func initClient(t *testing.T) *Client {
-	client, err := NewClient("http://127.0.0.1:5555")
+func initClient(t *testing.T) *http.Client {
+	client, err := http.NewClient("http://127.0.0.1:5555")
 	if err != nil {
 		t.Errorf("Could instantiate client: %s", err)
 		t.FailNow()
@@ -43,39 +43,36 @@ func initClient(t *testing.T) *Client {
 
 func TestReadWrites(t *testing.T) {
 	server := initServer(t)
-	defer server.storage.Destroy()
-	defer server.Close()
+	defer server.CloseAndDestroyStorage()
 
 	client := initClient(t)
 	defer client.Close()
 
-	test.TestCreateDirectory(t, client, "/testDir")
-	test.TestGetDirectory(t, client, "/testDir")
-	test.TestCreateFile(t, client, "/testDir", "testFile", "testData")
-	test.TestReadFile(t, client, "/testDir", "testFile", "testData")
+	TestCreateDirectory(t, client, "/testDir")
+	TestGetDirectory(t, client, "/testDir")
+	TestCreateFile(t, client, "/testDir", "testFile", "testData")
+	TestReadFile(t, client, "/testDir", "testFile", "testData")
 }
 
 func TestLs(t *testing.T) {
 	server := initServer(t)
-	defer server.storage.Destroy()
-	defer server.Close()
+	defer server.CloseAndDestroyStorage()
 
 	client := initClient(t)
 	defer client.Close()
 
-	test.TestReadDir(t, client)
+	TestReadDir(t, client)
 }
 
 func TestConcurrentClients(t *testing.T) {
 	server := initServer(t)
-	defer server.storage.Destroy()
-	defer server.Close()
+	defer server.CloseAndDestroyStorage()
 
 	wg := sync.WaitGroup{}
 
 	initialClient := initClient(t)
 	defer initialClient.Close()
-	test.TestCreateDirectory(t, initialClient, "/testDir")
+	TestCreateDirectory(t, initialClient, "/testDir")
 
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
@@ -85,8 +82,8 @@ func TestConcurrentClients(t *testing.T) {
 			defer wg.Done()
 			fileName := fmt.Sprintf("testFile-%d", id)
 			data := fmt.Sprintf("testData-%d", id)
-			test.TestCreateFile(t, client, "/testDir", fileName, data)
-			test.TestReadFile(t, client, "/testDir", fileName, data)
+			TestCreateFile(t, client, "/testDir", fileName, data)
+			TestReadFile(t, client, "/testDir", fileName, data)
 		}(i)
 	}
 	wg.Wait()

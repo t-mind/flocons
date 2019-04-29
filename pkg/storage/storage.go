@@ -68,7 +68,7 @@ func NewStorage(config *flocons.Config) (*Storage, error) {
 	if !fi.IsDir() {
 		return nil, NewIsNotDirError(s.path)
 	}
-	testPath := filepath.Join(s.path, "flocons-test")
+	testPath := s.MakeAbsolute("flocons-test")
 	if file, err := os.Create(testPath); err == nil {
 		file.Close()
 	} else {
@@ -80,9 +80,16 @@ func NewStorage(config *flocons.Config) (*Storage, error) {
 	return &s, nil
 }
 
+func (s *Storage) MakeAbsolute(p string) string {
+	if !filepath.IsAbs(p) {
+		return filepath.Join(s.path, p)
+	}
+	return p
+}
+
 func (s *Storage) CreateDirectory(p string, mode os.FileMode) (os.FileInfo, error) {
 	mode |= 0700 // be sure that we will whatever be able to interact with this directory
-	fullPath := filepath.Join(s.path, p)
+	fullPath := s.MakeAbsolute(p)
 	fmt.Printf("create directory %s with mode %o\n", fullPath, mode)
 	if err := os.Mkdir(fullPath, mode); err != nil {
 		return nil, err
@@ -91,7 +98,7 @@ func (s *Storage) CreateDirectory(p string, mode os.FileMode) (os.FileInfo, erro
 }
 
 func (s *Storage) GetDirectory(p string) (os.FileInfo, error) {
-	fullPath := filepath.Join(s.path, p)
+	fullPath := s.MakeAbsolute(p)
 
 	fi, err := os.Stat(fullPath)
 	if err != nil {
@@ -115,7 +122,7 @@ func (s *Storage) CreateRegularFile(p string, mode os.FileMode, data []byte) (os
 
 func (s *Storage) GetRegularFile(p string) (os.FileInfo, error) {
 	directory := filepath.Dir(p)
-	fullDirectory := filepath.Join(s.path, directory)
+	fullDirectory := s.MakeAbsolute(directory)
 	fileName := filepath.Base(p)
 	fi, err := os.Stat(fullDirectory)
 	if err != nil {
@@ -188,7 +195,7 @@ func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry Di
 		}
 		if writeContainer == nil {
 			name := NewRegularFileContainerName(s.config.Node.Name, 1)
-			writeContainer, _ = NewRegularFileContainer(filepath.Join(s.path, directory), name, s.config, nil)
+			writeContainer, _ = NewRegularFileContainer(s.MakeAbsolute(directory), name, s.config, nil)
 			cacheEntry.containers[name] = writeContainer
 			*cacheEntry.writeContainer = writeContainer
 		}
@@ -196,7 +203,7 @@ func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry Di
 }
 
 func (s *Storage) ReadDir(directory string) ([]os.FileInfo, error) {
-	fullpath := filepath.Join(s.path, directory)
+	fullpath := s.MakeAbsolute(directory)
 	fi, err := os.Stat(fullpath)
 	if err != nil {
 		return nil, err
@@ -240,9 +247,9 @@ func (s *Storage) Close() {
 	s.directoryCache.Clear()
 }
 
-func (s *Storage) Destroy() {
+func (s *Storage) Destroy() error {
 	s.Close()
-	os.RemoveAll(s.path)
+	return os.RemoveAll(s.path)
 }
 
 func newRegularFileContainerWalker(s *Storage, directory string) *regularFileContainerWalker {
@@ -266,7 +273,7 @@ func (w *regularFileContainerWalker) Next() (*RegularFileContainer, error) {
 		return w.cacheEntry.containers[w.cacheKeys[w.currentIndex]], nil
 	}
 
-	fullpath := filepath.Join(w.storage.path, w.directory)
+	fullpath := w.storage.MakeAbsolute(w.directory)
 	if w.files == nil {
 		files, err := ioutil.ReadDir(fullpath)
 		if err != nil {
