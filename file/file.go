@@ -9,6 +9,7 @@ import (
 
 type FileDataSource struct {
 	Node      string
+	Shard     string
 	Container string
 	Address   int64
 	Data      func() ([]byte, error)
@@ -50,6 +51,9 @@ func (i *FileInfo) UpdateDataSource(s FileDataSource) {
 	if s.Node != "" {
 		i.sys.Node = s.Node
 	}
+	if s.Shard != "" {
+		i.sys.Shard = s.Shard
+	}
 	if s.Container != "" {
 		i.sys.Container = s.Container
 	}
@@ -75,6 +79,7 @@ func (i *FileInfo) Size() int64 {
 func (i *FileInfo) Mode() os.FileMode {
 	return i.mode
 }
+
 func (i *FileInfo) ModTime() time.Time {
 	return i.modTime
 }
@@ -97,8 +102,16 @@ func (i *FileInfo) Node() string {
 	return i.sys.Node
 }
 
+func (i *FileInfo) Shard() string {
+	return i.sys.Shard
+}
+
 func (i *FileInfo) Container() string {
 	return i.sys.Container
+}
+
+func (i *FileInfo) IsDataAvailable() bool {
+	return i.sys.Data != nil
 }
 
 func (i *FileInfo) Data() ([]byte, error) {

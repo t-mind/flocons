@@ -11,43 +11,45 @@ import (
 	"sync"
 	"time"
 
-	"github.com/macq/flocons"
-	"github.com/macq/flocons/file"
+	"github.com/macq/flocons/config"
 	. "github.com/macq/flocons/error"
+	"github.com/macq/flocons/file"
 )
 
-var containerRegexp, _ = regexp.Compile("^files_(([^_]+)_v([0-9]+)_([0-9]+)).tar$")
+var containerRegexp, _ = regexp.Compile(`^files_(([^_]+)_([^_]+)_v([0-9]+)_([0-9]+)).tar$`)
 
 func IsRegularFileContainer(name string) bool {
 	return containerRegexp.MatchString(name)
 }
 
-func NewRegularFileContainerName(node string, number int) string {
-	return fmt.Sprintf("files_%s_v1_%d.tar", node, number)
+func NewRegularFileContainerName(shard string, node string, number int) string {
+	return fmt.Sprintf("files_%s_%s_v1_%d.tar", shard, node, number)
 }
 
 type RegularFileContainer struct {
 	Name       string
 	Node       string
+	Shard      string
 	Version    int
 	Number     int
 	path       string
-	config     *flocons.Config
+	config     *config.Config
 	writeFd    *os.File
 	tarWriter  *tar.Writer
 	writeMutex *sync.Mutex
 	index      *RegularFileContainerIndex
 }
 
-func NewRegularFileContainer(directory string, name string, config *flocons.Config, index *RegularFileContainerIndex) (*RegularFileContainer, error) {
+func NewRegularFileContainer(directory string, name string, config *config.Config, index *RegularFileContainerIndex) (*RegularFileContainer, error) {
 	fullpath := filepath.Join(directory, name)
 	parts := containerRegexp.FindStringSubmatch(name)
 	if parts == nil {
 		return nil, NewInternalError("Tried to create a container with name " + name + " which is invalid")
 	}
-	node := parts[2]
-	version, _ := strconv.Atoi(parts[3])
-	number, _ := strconv.Atoi(parts[4])
+	shard := parts[2]
+	node := parts[3]
+	version, _ := strconv.Atoi(parts[4])
+	number, _ := strconv.Atoi(parts[5])
 
 	_, err := os.Stat(fullpath)
 	if err != nil && !os.IsNotExist(err) {
@@ -55,39 +57,34 @@ func NewRegularFileContainer(directory string, name string, config *flocons.Conf
 	}
 	var index_err error
 	if index == nil {
-		index, index_err = FindRegularFileContainerIndex(directory, node, number, config)
+		index, index_err = FindRegularFileContainerIndex(directory, shard, node, number, config)
 		if index_err != nil && !os.IsNotExist(index_err) {
 			return nil, index_err
 		}
 	}
 
-	if err != nil {
-		if index_err == nil {
-			// We didn't find the container file but well the index file
-			if config.Node.Name == node {
-				// This can be normal only if the file comes from another node
+	if err != nil && index_err != nil {
+		// We didn't fint the container file neither the index file
+		if config.Node.Name == node {
+			// This can be normal only if the file is from this node
+			f, err := os.Create(fullpath)
+			if err != nil {
+				return nil, err
+			}
+			f.Close()
+			index, index_err = NewRegularFileContainerIndex(directory, NewRegularFileContainerIndexName(shard, node, number), config)
+			if index_err != nil {
 				return nil, err
 			}
 		} else {
-			// We didn't fint the container file neither the index file
-			if config.Node.Name == node {
-				// This can be normal only if the file is from this node
-				f, err := os.Create(fullpath)
-				if err != nil {
-					return nil, err
-				}
-				f.Close()
-				index, index_err = NewRegularFileContainerIndex(directory, NewRegularFileContainerIndexName(node, number), config)
-				if index_err != nil {
-					return nil, err
-				}
-			}
+			return nil, err
 		}
 	}
 
 	return &RegularFileContainer{
 		Name:       name,
 		Node:       node,
+		Shard:      shard,
 		Version:    version,
 		Number:     number,
 		path:       fullpath,
@@ -137,7 +134,7 @@ func (c *RegularFileContainer) GetRegularFile(name string) (os.FileInfo, error) 
 			}
 		}
 		if fi != nil {
-			storageFileInfo := file.FileInfoFromFileInfo(fi, file.FileDataSource{Address: address})
+			storageFileInfo := file.FileInfoFromFileInfo(fi, file.FileDataSource{Address: address, Node: c.Node, Shard: c.Shard})
 			fi = storageFileInfo
 		}
 	}
@@ -149,6 +146,7 @@ func (c *RegularFileContainer) GetRegularFile(name string) (os.FileInfo, error) 
 	storageFileInfo.UpdateDataSource(file.FileDataSource{
 		Container: c.Name,
 		Node:      c.Node,
+		Shard:     c.Shard,
 		Data: func() ([]byte, error) {
 			return c.GetRegularFileData(storageFileInfo)
 		},
@@ -242,7 +240,7 @@ func (c *RegularFileContainer) CreateRegularFile(name string, mode os.FileMode, 
 		return nil, err
 	}
 
-	fi := file.FileInfoFromFileInfo(header.FileInfo(), file.FileDataSource{Address: address})
+	fi := file.FileInfoFromFileInfo(header.FileInfo(), file.FileDataSource{Address: address, Node: c.Node, Shard: c.Shard})
 
 	if c.index != nil {
 		if err = c.index.AddRegularFile(fi); err != nil {
@@ -265,6 +263,7 @@ func (c *RegularFileContainer) ListFiles() ([]os.FileInfo, error) {
 	defer f.Close()
 	reader := tar.NewReader(f)
 	files := make([]os.FileInfo, 0, 100)
+	var address int64
 	for {
 		h, err := reader.Next()
 		if h == nil {
@@ -273,7 +272,16 @@ func (c *RegularFileContainer) ListFiles() ([]os.FileInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, h.FileInfo())
+		files = append(files, file.FileInfoFromFileInfo(h.FileInfo(), file.FileDataSource{Address: address, Node: c.Node, Shard: c.Shard}))
+
+		// Let's compute address for next header
+		address, _ = f.Seek(0, os.SEEK_CUR)
+		address += h.Size
+		// in tar, blocks are rounded to 512
+		mod512 := address % 512
+		if mod512 > 0 {
+			address += 512 - mod512
+		}
 	}
 	return files, nil
 }

@@ -5,11 +5,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/macq/flocons"
+	"github.com/macq/flocons/config"
 )
 
 func TestEmptyConfig(t *testing.T) {
-	config, err := flocons.NewConfigFromJson([]byte(`{}`))
+	config, err := config.NewConfigFromJson([]byte(`{}`))
 	if err != nil {
 		t.Errorf("Could not parse config %s", err)
 	} else {
@@ -23,7 +23,7 @@ func TestEmptyConfig(t *testing.T) {
 }
 
 func TestSimpleConfig(t *testing.T) {
-	config, err := flocons.NewConfigFromJson([]byte(`{"namespace": "test"}`))
+	config, err := config.NewConfigFromJson([]byte(`{"namespace": "test"}`))
 	if err != nil {
 		t.Errorf("Could not parse config %s", err)
 	} else {
@@ -34,7 +34,7 @@ func TestSimpleConfig(t *testing.T) {
 }
 
 func TestSimpleNodeConfig(t *testing.T) {
-	config, err := flocons.NewConfigFromJson([]byte(`{"node": {"port": 5555}, "storage": {"path": "/tmp"}}`))
+	config, err := config.NewConfigFromJson([]byte(`{"node": {"port": 5555}, "storage": {"path": "/tmp"}}`))
 	if err != nil {
 		t.Errorf("Could not parse config %s", err)
 	} else {
@@ -59,19 +59,19 @@ func TestSimpleNodeConfig(t *testing.T) {
 }
 
 func TestBadConfig(t *testing.T) {
-	if config, err := flocons.NewConfigFromJson([]byte(`{"namespace": "@name"}`)); err == nil {
+	if config, err := config.NewConfigFromJson([]byte(`{"namespace": "@name"}`)); err == nil {
 		t.Errorf("Config %v should have failed", config)
 	}
-	if config, err := flocons.NewConfigFromJson([]byte(`{"zookeeper": "localhost:2181"}`)); err == nil {
+	if config, err := config.NewConfigFromJson([]byte(`{"zookeeper": "localhost:2181"}`)); err == nil {
 		t.Errorf("Config %v should have failed", config)
 	}
-	if config, err := flocons.NewConfigFromJson([]byte(`{"zookeeper": ["localhost:999999"]}`)); err == nil {
+	if config, err := config.NewConfigFromJson([]byte(`{"zookeeper": ["localhost:999999"]}`)); err == nil {
 		t.Errorf("Config %v should have failed", config)
 	}
-	if config, err := flocons.NewConfigFromJson([]byte(`{"zookeeper": ["127.0.0.1", "@@:2181]}`)); err == nil {
+	if config, err := config.NewConfigFromJson([]byte(`{"zookeeper": ["127.0.0.1", "@@:2181]}`)); err == nil {
 		t.Errorf("Config %v should have failed", config)
 	}
-	if config, err := flocons.NewConfigFromJson([]byte(`{"node": {"port": 5555}}`)); err == nil {
+	if config, err := config.NewConfigFromJson([]byte(`{"node": {"port": 5555}}`)); err == nil {
 		t.Errorf("Config %v should have failed", config)
 	}
 }

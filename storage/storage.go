@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/macq/flocons"
+	"github.com/macq/flocons/config"
 	. "github.com/macq/flocons/error"
 
 	"github.com/golang/groupcache/lru"
@@ -19,7 +19,7 @@ const DIRECTORY_CACHE_SIZE int = 1000
 
 type Storage struct {
 	path             string
-	config           *flocons.Config
+	config           *config.Config
 	directoryCache   *lru.Cache
 	updateCacheMutex *sync.Mutex
 }
@@ -40,7 +40,7 @@ type regularFileContainerWalker struct {
 	files        []os.FileInfo
 }
 
-func NewStorage(config *flocons.Config) (*Storage, error) {
+func NewStorage(config *config.Config) (*Storage, error) {
 	if config.Storage.Path == "" {
 		return nil, NewInternalError("Tried to initialize storage with no configured path")
 	}
@@ -195,8 +195,11 @@ func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry *D
 			}
 		}
 		if writeContainer == nil {
-			name := NewRegularFileContainerName(s.config.Node.Name, 1)
-			writeContainer, _ = NewRegularFileContainer(s.MakeAbsolute(directory), name, s.config, nil)
+			name := NewRegularFileContainerName(s.config.Node.Shard, s.config.Node.Name, 1)
+			writeContainer, err := NewRegularFileContainer(s.MakeAbsolute(directory), name, s.config, nil)
+			if err != nil {
+				logger.Fatalf("Could not create new regular file container %s", err)
+			}
 			cacheEntry.containers[name] = writeContainer
 			cacheEntry.writeContainer = writeContainer
 		}
@@ -244,8 +247,12 @@ func (s *Storage) ReadDir(directory string) ([]os.FileInfo, error) {
 	return append(dirs, files...), nil
 }
 
-func (s *Storage) Close() {
+func (s *Storage) ResetCache() {
 	s.directoryCache.Clear()
+}
+
+func (s *Storage) Close() {
+	s.ResetCache()
 }
 
 func (s *Storage) Destroy() error {
@@ -315,7 +322,7 @@ func (w *regularFileContainerWalker) Next() (*RegularFileContainer, error) {
 					continue
 				}
 				// Let's defined the name of the empty refular file container that will be created
-				name = NewRegularFileContainerName(index.Node, index.Number)
+				name = NewRegularFileContainerName(index.Shard, index.Node, index.Number)
 			}
 		}
 		if !found {

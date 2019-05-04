@@ -3,10 +3,13 @@ package http
 import (
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
-	"github.com/macq/flocons"
+	"github.com/macq/flocons/cluster"
+	"github.com/macq/flocons/config"
 	. "github.com/macq/flocons/error"
 	"github.com/macq/flocons/file"
 	"github.com/macq/flocons/storage"
@@ -15,10 +18,11 @@ import (
 const FILE_WORKER_POOL_SIZE int = 10
 
 type Server struct {
-	config     *flocons.Config
-	storage    *storage.Storage
-	httpServer *http.Server
-	fileJobs   chan serverJob
+	config         *config.Config
+	storage        *storage.Storage
+	topologyClient *cluster.TopologyClient
+	httpServer     *http.Server
+	fileJobs       chan serverJob
 }
 
 type serverJob struct {
@@ -27,22 +31,28 @@ type serverJob struct {
 	barrier *sync.Cond
 }
 
-func NewServer(config *flocons.Config) (*Server, error) {
+func NewServer(config *config.Config, storage *storage.Storage, topologyClient *cluster.TopologyClient) (*Server, error) {
 	if config.Node.Port == 0 {
 		return nil, NewInternalError("No port configured")
 	}
-	storage, err := storage.NewStorage(config)
-	if err != nil {
-		return nil, err
+	if config == nil {
+		logger.Fatalf("Tried to create a new http server without config")
+	}
+	if storage == nil {
+		logger.Fatalf("Tried to create a new http server without storage")
+	}
+	if topologyClient == nil {
+		logger.Fatalf("Tried to create a new http server without topology client")
 	}
 
 	httpHandler := http.NewServeMux() // Don't use default handler because we would want several servers in parralel for tests
 	httpServer := &http.Server{Addr: ":" + strconv.Itoa(config.Node.Port), Handler: httpHandler}
 	server := Server{
-		config:     config,
-		storage:    storage,
-		httpServer: httpServer,
-		fileJobs:   make(chan serverJob),
+		config:         config,
+		storage:        storage,
+		topologyClient: topologyClient,
+		httpServer:     httpServer,
+		fileJobs:       make(chan serverJob),
 	}
 	server.start()
 	return &server, nil
@@ -51,7 +61,7 @@ func NewServer(config *flocons.Config) (*Server, error) {
 func (s *Server) start() {
 	httpHandler, _ := s.httpServer.Handler.(*http.ServeMux)
 	httpHandler.HandleFunc(FILES_PREFIX+"/", func(w http.ResponseWriter, r *http.Request) {
-		logger.Debugf("Handle file request %s on ressource %s\n", r.Method, r.URL.Path)
+		logger.Debugf("Handle file request %s on node %s for ressource %s", r.Method, s.config.Node.Name, r.URL.Path)
 		mutex := sync.Mutex{}
 		barrier := sync.NewCond(&mutex)
 		mutex.Lock()
@@ -60,37 +70,29 @@ func (s *Server) start() {
 		mutex.Unlock()
 	})
 	httpHandler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		logger.Warnf("Unhandled URL request %s\n", r.URL.Path)
+		logger.Warnf("Unhandled URL request %s", r.URL.Path)
 		w.WriteHeader(400)
 	})
 
 	logger.Info("Start workers")
 	for i := 0; i < FILE_WORKER_POOL_SIZE; i++ {
-		go func() {
-			s.waitForFileWork()
-		}()
+		go s.waitForFileWork()
 	}
 
 	go func() {
-		logger.Info("Start http server")
+		logger.Infof("Start http server on port %d", s.config.Node.Port)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Panicf("Http server failed %s\n", err)
+			logger.Fatalf("Http server failed %s", err)
 		}
 	}()
 }
 
 func (s *Server) waitForFileWork() {
-	for {
-		select {
-		case job, ok := <-s.fileJobs:
-			if !ok {
-				return // channel closed
-			}
-			job.barrier.L.Lock()
-			s.ServeFile(job.writer, job.request)
-			job.barrier.Broadcast()
-			job.barrier.L.Unlock()
-		}
+	for job := range s.fileJobs {
+		job.barrier.L.Lock()
+		s.ServeFile(job.writer, job.request)
+		job.barrier.Broadcast()
+		job.barrier.L.Unlock()
 	}
 }
 
@@ -167,7 +169,9 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 		storageFileInfo, _ := fi.(*file.FileInfo)
 		data, err = storageFileInfo.Data()
 		if err != nil {
-			returnError(err, w)
+			if !s.tryRedirectToNode(w, r, storageFileInfo.Node(), storageFileInfo.Shard()) {
+				returnError(err, w)
+			}
 			return
 		}
 	} else {
@@ -185,6 +189,51 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 	fileInfoToHeader(fi, w.Header())
 	w.Header().Set(CONTENT_LENGTH, strconv.FormatInt((int64)(len(data)), 10))
 	w.Write(data)
+}
+
+func (s *Server) tryRedirectToNode(w http.ResponseWriter, r *http.Request, node string, shard string) bool {
+	logger.Debugf("Try to redirect query to node %s of shard %s", node, shard)
+	address := ""
+	traversedNodes := []string{s.config.Node.Name}
+	query := r.URL.Query()
+	if nodes, ok := query[TRAVERSED_NODE_PARAMETER]; ok {
+		traversedNodes = append(traversedNodes, nodes...)
+	}
+	nodeAlreadyTraversed := sort.SearchStrings(traversedNodes, node) != len(traversedNodes)
+	if !nodeAlreadyTraversed {
+		logger.Debugf("Not not %s yed traversed, let's try to find info online", node)
+		// We didn't tried this node yet, let's see if it is online
+		if nodeInfo, found := s.topologyClient.Nodes[node]; found {
+			address = nodeInfo.Address
+		}
+	}
+	if address == "" {
+		// We already tried this node or it is not online, let's look for another node in the same shard
+		logger.Debugf("Look in shard %s for node not in %v", shard, traversedNodes)
+		for _, nodeInfo := range s.topologyClient.Nodes {
+			if nodeInfo.Shard == shard && sort.SearchStrings(traversedNodes, nodeInfo.Name) == len(traversedNodes) {
+				address = nodeInfo.Address
+				break
+			}
+		}
+	}
+
+	if address != "" {
+		uri := r.URL.String()
+		uri = address + uri[strings.Index(uri, FILES_PREFIX):]
+		if strings.Index(uri, "?") == -1 {
+			uri += "?"
+		} else {
+			uri += "&"
+		}
+		uri += TRAVERSED_NODE_PARAMETER + "=" + s.config.Node.Name
+
+		logger.Debugf("Redirect to URL %s", uri)
+		w.Header().Set(LOCATION, uri)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		return true
+	}
+	return false
 }
 
 func (s *Server) Close() {

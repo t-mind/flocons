@@ -3,7 +3,7 @@ package storage
 import (
 	"encoding/csv"
 
-	"github.com/macq/flocons"
+	"github.com/macq/flocons/config"
 	"github.com/macq/flocons/file"
 
 	"fmt"
@@ -18,41 +18,44 @@ import (
 	. "github.com/macq/flocons/error"
 )
 
-var indexRegexp, _ = regexp.Compile("^index_(([^_]+)_v([0-9]+)_([0-9]+)).csv$")
+var indexRegexp, _ = regexp.Compile(`^index_(([^_]+)_([^_]+)_v([0-9]+)_([0-9]+)).csv$`)
 
 func IsRegularFileContainerIndex(name string) bool {
 	return indexRegexp.MatchString(name)
 }
 
-func NewRegularFileContainerIndexName(node string, number int) string {
-	return fmt.Sprintf("index_%s_v1_%d.csv", node, number)
+func NewRegularFileContainerIndexName(shard string, node string, number int) string {
+	return fmt.Sprintf("index_%s_%s_v1_%d.csv", shard, node, number)
 }
 
 type RegularFileContainerIndex struct {
 	Name       string
 	Node       string
+	Shard      string
 	Version    int
 	Number     int
 	path       string
-	config     *flocons.Config
+	config     *config.Config
 	entries    map[string]os.FileInfo
 	lastSize   int64
 	writeFd    *os.File
 	writeMutex *sync.Mutex
 }
 
-func NewRegularFileContainerIndex(directory string, name string, config *flocons.Config) (*RegularFileContainerIndex, error) {
+func NewRegularFileContainerIndex(directory string, name string, config *config.Config) (*RegularFileContainerIndex, error) {
 	fullpath := filepath.Join(directory, name)
 	parts := indexRegexp.FindStringSubmatch(name)
 	if parts == nil {
 		return nil, NewInternalError("Tried to create a container index with name " + name + " which is invalid")
 	}
-	node := parts[2]
-	version, _ := strconv.Atoi(parts[3])
-	number, _ := strconv.Atoi(parts[4])
+	shard := parts[2]
+	node := parts[3]
+	version, _ := strconv.Atoi(parts[4])
+	number, _ := strconv.Atoi(parts[5])
 	index := RegularFileContainerIndex{
 		Name:       name,
 		Node:       node,
+		Shard:      shard,
 		Version:    version,
 		Number:     number,
 		path:       fullpath,
@@ -81,8 +84,8 @@ func NewRegularFileContainerIndex(directory string, name string, config *flocons
 	return &index, nil
 }
 
-func FindRegularFileContainerIndex(directory string, node string, number int, config *flocons.Config) (*RegularFileContainerIndex, error) {
-	pattern := fmt.Sprintf("%s_%s_v*_%d.csv", filepath.Join(directory, "index"), node, number)
+func FindRegularFileContainerIndex(directory string, shard string, node string, number int, config *config.Config) (*RegularFileContainerIndex, error) {
+	pattern := fmt.Sprintf("%s_%s_%s_v*_%d.csv", filepath.Join(directory, "index"), shard, node, number)
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, err

@@ -18,7 +18,7 @@ type FileService interface {
 	ReadDir(string) ([]os.FileInfo, error)
 }
 
-func TestCreateDirectory(t *testing.T, service FileService, dir string) {
+func testCreateDirectory(t *testing.T, service FileService, dir string) {
 	testName := filepath.Base(dir)
 	fmt.Printf("Create temp directory %s\n", testName)
 	f, err := service.CreateDirectory(dir, 0755)
@@ -37,7 +37,7 @@ func TestCreateDirectory(t *testing.T, service FileService, dir string) {
 	}
 }
 
-func TestGetDirectory(t *testing.T, service FileService, dir string) {
+func testGetDirectory(t *testing.T, service FileService, dir string) {
 	testName := filepath.Base(dir)
 	f, err := service.GetDirectory(dir)
 	if err != nil {
@@ -56,7 +56,7 @@ func TestGetDirectory(t *testing.T, service FileService, dir string) {
 	}
 }
 
-func TestCreateFile(t *testing.T, service FileService, dir string, name string, data string) {
+func testCreateFile(t *testing.T, service FileService, dir string, name string, data string) {
 	f, err := service.CreateRegularFile(filepath.Join(dir, name), 0644, []byte(data))
 	if err != nil {
 		t.Errorf("Could not create file %s: %s", name, err)
@@ -67,7 +67,7 @@ func TestCreateFile(t *testing.T, service FileService, dir string, name string, 
 	}
 }
 
-func TestReadFile(t *testing.T, service FileService, dir string, name string, testData string) os.FileInfo {
+func testReadFile(t *testing.T, service FileService, dir string, name string, testData string) os.FileInfo {
 	f, err := service.GetRegularFile(filepath.Join(dir, name))
 	if err != nil {
 		t.Errorf("Could get back file %s: %s", name, err)
@@ -93,7 +93,7 @@ func TestReadFile(t *testing.T, service FileService, dir string, name string, te
 	return f
 }
 
-func TestReadDir(t *testing.T, service FileService) {
+func testReadDir(t *testing.T, service FileService) {
 	testDir := "/testDir"
 	service.CreateDirectory(testDir, 0755)
 

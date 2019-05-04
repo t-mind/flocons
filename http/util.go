@@ -19,6 +19,7 @@ import (
 )
 
 const FILES_PREFIX string = "/files"
+const TRAVERSED_NODE_PARAMETER string = "traversed-node"
 
 func errorToHttpStatus(err error) int {
 	switch {

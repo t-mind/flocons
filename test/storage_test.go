@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/macq/flocons"
+	"github.com/macq/flocons/config"
 	"github.com/macq/flocons/storage"
 )
 
@@ -21,7 +21,7 @@ func initStorages(t *testing.T, count int) []*storage.Storage {
 	ss := make([]*storage.Storage, count)
 	for i := 0; i < count; i++ {
 		json_config := fmt.Sprintf(`{"node": {"name": "node-%d"}, "storage": {"path": %q}}`, i, directory)
-		config, err := flocons.NewConfigFromJson([]byte(json_config))
+		config, err := config.NewConfigFromJson([]byte(json_config))
 		if err != nil {
 			t.Errorf("Could not parse config %s: %s", json_config, err)
 			t.FailNow()
@@ -45,10 +45,10 @@ func TestDirectory(t *testing.T) {
 	if err == nil {
 		t.Errorf("Found directory %s which should not exist", f.Name())
 	}
-	TestCreateDirectory(t, storage, "/testDir")
-	TestGetDirectory(t, storage, "/testDir")
-	TestCreateDirectory(t, storage, "/testDir/testSubdir")
-	TestGetDirectory(t, storage, "/testDir/testSubdir")
+	testCreateDirectory(t, storage, "/testDir")
+	testGetDirectory(t, storage, "/testDir")
+	testCreateDirectory(t, storage, "/testDir/testSubdir")
+	testGetDirectory(t, storage, "/testDir/testSubdir")
 }
 
 func TestStorageRegularFile(t *testing.T) {
@@ -56,30 +56,30 @@ func TestStorageRegularFile(t *testing.T) {
 	defer storage.Destroy()
 
 	testDir := "/testDir"
-	TestCreateDirectory(t, storage, testDir)
+	testCreateDirectory(t, storage, testDir)
 
 	before := time.Now().Truncate(1e9) // Take now truncated at second
-	TestCreateFile(t, storage, testDir, "testFile", "testData")
-	f := TestReadFile(t, storage, testDir, "testFile", "testData")
+	testCreateFile(t, storage, testDir, "testFile", "testData")
+	f := testReadFile(t, storage, testDir, "testFile", "testData")
 
 	after := time.Now()
 	if f.ModTime().Before(before) || f.ModTime().After(after) {
 		t.Errorf("Modification time %s is not between %s and %s", f.ModTime().String(), before.String(), after.String())
 	}
 
-	TestCreateFile(t, storage, testDir, "testFile1", "testData1")
-	TestCreateFile(t, storage, testDir, "testFile2", "testData2")
-	TestCreateFile(t, storage, testDir, "testFile3", "testData3")
-	TestReadFile(t, storage, testDir, "testFile3", "testData3")
-	TestReadFile(t, storage, testDir, "testFile2", "testData2")
-	TestReadFile(t, storage, testDir, "testFile1", "testData1")
+	testCreateFile(t, storage, testDir, "testFile1", "testData1")
+	testCreateFile(t, storage, testDir, "testFile2", "testData2")
+	testCreateFile(t, storage, testDir, "testFile3", "testData3")
+	testReadFile(t, storage, testDir, "testFile3", "testData3")
+	testReadFile(t, storage, testDir, "testFile2", "testData2")
+	testReadFile(t, storage, testDir, "testFile1", "testData1")
 }
 
 func TestStorageLs(t *testing.T) {
 	storage := initStorages(t, 1)[0]
 	defer storage.Destroy()
 
-	TestReadDir(t, storage)
+	testReadDir(t, storage)
 }
 func TestStorageConcurrentBasic(t *testing.T) {
 	ss := initStorages(t, 2)
@@ -88,15 +88,15 @@ func TestStorageConcurrentBasic(t *testing.T) {
 
 	testDir := "/testDir"
 
-	TestCreateDirectory(t, ss[0], testDir)
-	TestCreateFile(t, ss[1], testDir, "testFile1", "testData1")
-	TestReadFile(t, ss[0], testDir, "testFile1", "testData1")
-	TestCreateFile(t, ss[0], testDir, "testFile2", "testData2")
-	TestCreateFile(t, ss[0], testDir, "testFile3", "testData3")
-	TestReadFile(t, ss[1], testDir, "testFile3", "testData3")
-	TestReadFile(t, ss[1], testDir, "testFile2", "testData2")
-	TestCreateFile(t, ss[1], testDir, "testFile4", "testData4")
-	TestReadFile(t, ss[0], testDir, "testFile4", "testData4")
+	testCreateDirectory(t, ss[0], testDir)
+	testCreateFile(t, ss[1], testDir, "testFile1", "testData1")
+	testReadFile(t, ss[0], testDir, "testFile1", "testData1")
+	testCreateFile(t, ss[0], testDir, "testFile2", "testData2")
+	testCreateFile(t, ss[0], testDir, "testFile3", "testData3")
+	testReadFile(t, ss[1], testDir, "testFile3", "testData3")
+	testReadFile(t, ss[1], testDir, "testFile2", "testData2")
+	testCreateFile(t, ss[1], testDir, "testFile4", "testData4")
+	testReadFile(t, ss[0], testDir, "testFile4", "testData4")
 }
 
 func TestStorageMissingIndexes(t *testing.T) {
@@ -104,10 +104,10 @@ func TestStorageMissingIndexes(t *testing.T) {
 	defer ss[0].Destroy()
 
 	testDir := "/testDir"
-	TestCreateDirectory(t, ss[1], testDir)
-	TestCreateFile(t, ss[1], testDir, "testFile1", "testData1")
-	TestCreateFile(t, ss[1], testDir, "testFile2", "testData2")
-	TestCreateFile(t, ss[1], testDir, "testFile3", "testData3")
+	testCreateDirectory(t, ss[1], testDir)
+	testCreateFile(t, ss[1], testDir, "testFile1", "testData1")
+	testCreateFile(t, ss[1], testDir, "testFile2", "testData2")
+	testCreateFile(t, ss[1], testDir, "testFile3", "testData3")
 	ss[1].Close()
 
 	dirPath := ss[0].MakeAbsolute(testDir)
@@ -116,9 +116,9 @@ func TestStorageMissingIndexes(t *testing.T) {
 		os.Remove(f)
 	}
 
-	TestReadFile(t, ss[0], testDir, "testFile3", "testData3")
-	TestReadFile(t, ss[0], testDir, "testFile2", "testData2")
-	TestReadFile(t, ss[0], testDir, "testFile1", "testData1")
+	testReadFile(t, ss[0], testDir, "testFile3", "testData3")
+	testReadFile(t, ss[0], testDir, "testFile2", "testData2")
+	testReadFile(t, ss[0], testDir, "testFile1", "testData1")
 }
 
 func TestMissingContainer(t *testing.T) {
@@ -126,10 +126,10 @@ func TestMissingContainer(t *testing.T) {
 	defer ss[0].Destroy()
 
 	testDir := "/testDir"
-	TestCreateDirectory(t, ss[1], testDir)
-	TestCreateFile(t, ss[1], testDir, "testFile1", "testData1")
-	TestCreateFile(t, ss[1], testDir, "testFile2", "testData2")
-	TestCreateFile(t, ss[1], testDir, "testFile3", "testData3")
+	testCreateDirectory(t, ss[1], testDir)
+	testCreateFile(t, ss[1], testDir, "testFile1", "testData1")
+	testCreateFile(t, ss[1], testDir, "testFile2", "testData2")
+	testCreateFile(t, ss[1], testDir, "testFile3", "testData3")
 	ss[1].Close()
 
 	dirPath := ss[0].MakeAbsolute(testDir)
@@ -140,9 +140,9 @@ func TestMissingContainer(t *testing.T) {
 		}
 	}
 
-	TestReadFile(t, ss[0], testDir, "testFile3", "")
-	TestReadFile(t, ss[0], testDir, "testFile2", "")
-	TestReadFile(t, ss[0], testDir, "testFile1", "")
+	testReadFile(t, ss[0], testDir, "testFile3", "")
+	testReadFile(t, ss[0], testDir, "testFile2", "")
+	testReadFile(t, ss[0], testDir, "testFile1", "")
 
 	files, _ = filepath.Glob(filepath.Join(dirPath, "files*"))
 	if len(files) > 0 {

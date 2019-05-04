@@ -7,7 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/macq/flocons"
+	"github.com/macq/flocons/cluster"
+
+	"github.com/macq/flocons/storage"
+
+	"github.com/macq/flocons/config"
 	"github.com/macq/flocons/http"
 )
 
@@ -18,13 +22,18 @@ func initServer(t *testing.T) *http.Server {
 	}
 
 	json_config := fmt.Sprintf(`{"node": {"name": "node-%d", "port": 5555}, "storage": {"path": %q}}`, 0, directory)
-	config, err := flocons.NewConfigFromJson([]byte(json_config))
+	config, err := config.NewConfigFromJson([]byte(json_config))
 	if err != nil {
 		t.Errorf("Could not parse config %s: %s", json_config, err)
 		t.FailNow()
 	}
 
-	server, err := http.NewServer(config)
+	storage, err := storage.NewStorage(config)
+	if err != nil {
+		t.Errorf("Could not instantiate storage: %s", err)
+	}
+
+	server, err := http.NewServer(config, storage, &cluster.TopologyClient{Nodes: make(map[string]*cluster.NodeInfo)})
 	if err != nil {
 		t.Errorf("Could instantiate server: %s", err)
 		t.FailNow()
@@ -48,10 +57,10 @@ func TestReadWrites(t *testing.T) {
 	client := initClient(t)
 	defer client.Close()
 
-	TestCreateDirectory(t, client, "/testDir")
-	TestGetDirectory(t, client, "/testDir")
-	TestCreateFile(t, client, "/testDir", "testFile", "testData")
-	TestReadFile(t, client, "/testDir", "testFile", "testData")
+	testCreateDirectory(t, client, "/testDir")
+	testGetDirectory(t, client, "/testDir")
+	testCreateFile(t, client, "/testDir", "testFile", "testData")
+	testReadFile(t, client, "/testDir", "testFile", "testData")
 }
 
 func TestLs(t *testing.T) {
@@ -61,7 +70,7 @@ func TestLs(t *testing.T) {
 	client := initClient(t)
 	defer client.Close()
 
-	TestReadDir(t, client)
+	testReadDir(t, client)
 }
 
 func TestConcurrentClients(t *testing.T) {
@@ -72,7 +81,7 @@ func TestConcurrentClients(t *testing.T) {
 
 	initialClient := initClient(t)
 	defer initialClient.Close()
-	TestCreateDirectory(t, initialClient, "/testDir")
+	testCreateDirectory(t, initialClient, "/testDir")
 
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
@@ -82,8 +91,8 @@ func TestConcurrentClients(t *testing.T) {
 			defer client.Close()
 			fileName := fmt.Sprintf("testFile-%d", id)
 			data := fmt.Sprintf("testData-%d", id)
-			TestCreateFile(t, client, "/testDir", fileName, data)
-			TestReadFile(t, client, "/testDir", fileName, data)
+			testCreateFile(t, client, "/testDir", fileName, data)
+			testReadFile(t, client, "/testDir", fileName, data)
 		}(i)
 	}
 	wg.Wait()
