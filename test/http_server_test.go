@@ -12,10 +12,11 @@ import (
 	"github.com/macq/flocons/config"
 	"github.com/macq/flocons/http"
 	"github.com/macq/flocons/storage"
+	"github.com/macq/flocons/test/mock"
 	log "github.com/sirupsen/logrus"
 )
 
-func createServerAndClient(t *testing.T, number int, mock *ZookeeperMock) (*http.Server, *http.Client, *storage.Storage) {
+func createServerAndClient(t *testing.T, number int, zookeeper *mock.Zookeeper, trueDispatcher bool) (*http.Server, *http.Client, *storage.Storage) {
 	directory, err := ioutil.TempDir(os.TempDir(), "flocons-test")
 	if err != nil {
 		panic(err)
@@ -33,7 +34,17 @@ func createServerAndClient(t *testing.T, number int, mock *ZookeeperMock) (*http
 		t.Errorf("Could not instantiate storage: %s", err)
 	}
 
-	server, err := http.NewServer(config, storage, cluster.NewClientWithZookeperClientFactory(config, mock.GetFactory()))
+	var dispatcher cluster.Dispatcher
+	if !trueDispatcher {
+		dispatcher = &mock.NullDispatcher{}
+	} else {
+		dispatcher, err = cluster.NewMaglevDispatcher()
+		if err != nil {
+			t.Errorf("Could not instantiate maglev dispatcher: %s", err)
+		}
+	}
+
+	server, err := http.NewServer(config, storage, cluster.NewClientWithZookeperClientFactory(config, zookeeper.GetFactory(), dispatcher))
 	if err != nil {
 		t.Errorf("Could instantiate server: %s", err)
 		storage.Destroy()
@@ -51,11 +62,11 @@ func createServerAndClient(t *testing.T, number int, mock *ZookeeperMock) (*http
 
 func TestDistributedIndex(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	mock := NewZookeeperMock()
-	server1, client1, storage1 := createServerAndClient(t, 1, mock)
+	mock := mock.NewZookeeper()
+	server1, client1, storage1 := createServerAndClient(t, 1, mock, false)
 	defer server1.CloseAndDestroyStorage()
 	defer client1.Close()
-	server2, client2, storage2 := createServerAndClient(t, 2, mock)
+	server2, client2, storage2 := createServerAndClient(t, 2, mock, false)
 	defer server2.CloseAndDestroyStorage()
 	defer client2.Close()
 
@@ -79,17 +90,17 @@ func TestDistributedIndex(t *testing.T) {
 
 func TestDistributedIndexAndBadContainer(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	mock := NewZookeeperMock()
-	server1, client1, storage1 := createServerAndClient(t, 1, mock)
+	mock := mock.NewZookeeper()
+	server1, client1, storage1 := createServerAndClient(t, 1, mock, false)
 	defer server1.CloseAndDestroyStorage()
 	defer client1.Close()
-	server2, client2, storage2 := createServerAndClient(t, 2, mock)
+	server2, client2, storage2 := createServerAndClient(t, 2, mock, false)
 	defer server2.CloseAndDestroyStorage()
 	defer client2.Close()
-	server3, client3, storage3 := createServerAndClient(t, 3, mock)
+	server3, client3, storage3 := createServerAndClient(t, 3, mock, false)
 	defer server3.CloseAndDestroyStorage()
 	defer client3.Close()
-	server4, client4, storage4 := createServerAndClient(t, 4, mock)
+	server4, client4, storage4 := createServerAndClient(t, 4, mock, false)
 	defer server4.CloseAndDestroyStorage()
 	defer client4.Close()
 
@@ -126,4 +137,35 @@ func TestDistributedIndexAndBadContainer(t *testing.T) {
 		fmt.Println(err)
 	}
 	testReadFile(t, client1, "/dir", "testFile", "testData")
+}
+
+func TestSimpleDispatching(t *testing.T) {
+	log.SetLevel(log.DebugLevel)
+	numFiles := 100
+	mock := mock.NewZookeeper()
+	server1, client1, _ := createServerAndClient(t, 1, mock, true)
+	defer server1.CloseAndDestroyStorage()
+	defer client1.Close()
+	server2, client2, _ := createServerAndClient(t, 2, mock, true)
+	defer server2.CloseAndDestroyStorage()
+	defer client2.Close()
+
+	testCreateDirectory(t, client1, "/dir")
+	testCreateDirectory(t, client2, "/dir")
+
+	for i := 0; i < numFiles; i++ {
+		client := client1
+		if i%2 == 0 {
+			client = client2
+		}
+		testCreateFile(t, client, "/dir", fmt.Sprintf("testFile%d", i), fmt.Sprintf("testData%d", i))
+	}
+
+	for i := 0; i < numFiles; i++ {
+		client := client1
+		if i%2 != 0 {
+			client = client2
+		}
+		testReadFile(t, client, "/dir", fmt.Sprintf("testFile%d", i), fmt.Sprintf("testData%d", i))
+	}
 }

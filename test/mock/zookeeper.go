@@ -1,4 +1,4 @@
-package test
+package mock
 
 import (
 	"path"
@@ -8,37 +8,37 @@ import (
 	"github.com/samuel/go-zookeeper/zk"
 )
 
-type ZookeeperMock struct {
-	root   *zookeeperMockNode
-	events chan zk.Event
+type Zookeeper struct {
+	root   *ZookeeperNode
+	Events chan zk.Event
 }
 
-type ZookeeperClientMock struct {
-	zk     *ZookeeperMock
+type ZookeeperClient struct {
+	zk     *Zookeeper
 	events chan zk.Event
 	closed bool
 }
 
-func NewZookeeperMock() *ZookeeperMock {
-	return &ZookeeperMock{
-		root:   newZookeeperMockNode(nil, nil),
-		events: make(chan zk.Event, 1000),
+func NewZookeeper() *Zookeeper {
+	return &Zookeeper{
+		root:   newZookeeperNode(nil, nil),
+		Events: make(chan zk.Event, 1000),
 	}
 }
 
-func (z *ZookeeperMock) GetFactory() cluster.ZookeeperClientFactory {
+func (z *Zookeeper) GetFactory() cluster.ZookeeperClientFactory {
 	return func(servers []string, sessionTimeout time.Duration) (cluster.ZookeeperClient, <-chan zk.Event, error) {
-		client := ZookeeperClientMock{
+		client := ZookeeperClient{
 			zk:     z,
 			events: make(chan zk.Event, 1000),
 		}
-		z.events <- zk.Event{Type: zk.EventSession, State: zk.StateConnected}
+		z.Events <- zk.Event{Type: zk.EventSession, State: zk.StateConnected}
 		client.events <- zk.Event{Type: zk.EventSession, State: zk.StateConnected}
 		return &client, client.events, nil
 	}
 }
 
-func (c *ZookeeperClientMock) Create(p string, data []byte, flags int32, acl []zk.ACL) (string, error) {
+func (c *ZookeeperClient) Create(p string, data []byte, flags int32, acl []zk.ACL) (string, error) {
 	if c.closed {
 		return "", zk.ErrConnectionClosed
 	}
@@ -51,7 +51,7 @@ func (c *ZookeeperClientMock) Create(p string, data []byte, flags int32, acl []z
 	if err != nil {
 		return "", err
 	}
-	var ephemeralNode *ZookeeperClientMock
+	var ephemeralNode *ZookeeperClient
 	if flags&zk.FlagEphemeral == zk.FlagEphemeral {
 		ephemeralNode = c
 	}
@@ -59,11 +59,11 @@ func (c *ZookeeperClientMock) Create(p string, data []byte, flags int32, acl []z
 	if err != nil {
 		return "", err
 	}
-	c.zk.events <- zk.Event{Type: zk.EventNodeCreated, Path: p}
+	c.zk.Events <- zk.Event{Type: zk.EventNodeCreated, Path: p}
 	return "", nil
 }
 
-func (c *ZookeeperClientMock) Set(p string, data []byte, version int32) (*zk.Stat, error) {
+func (c *ZookeeperClient) Set(p string, data []byte, version int32) (*zk.Stat, error) {
 	if c.closed {
 		return nil, zk.ErrConnectionClosed
 	}
@@ -73,11 +73,11 @@ func (c *ZookeeperClientMock) Set(p string, data []byte, version int32) (*zk.Sta
 	}
 	node.setData(data)
 
-	c.zk.events <- zk.Event{Type: zk.EventNodeDataChanged, Path: p}
+	c.zk.Events <- zk.Event{Type: zk.EventNodeDataChanged, Path: p}
 	return nil, nil
 }
 
-func (c *ZookeeperClientMock) Delete(p string, version int32) error {
+func (c *ZookeeperClient) Delete(p string, version int32) error {
 	if c.closed {
 		return zk.ErrConnectionClosed
 	}
@@ -91,11 +91,11 @@ func (c *ZookeeperClientMock) Delete(p string, version int32) error {
 	if err != nil {
 		return err
 	}
-	c.zk.events <- zk.Event{Type: zk.EventNodeDeleted, Path: p}
+	c.zk.Events <- zk.Event{Type: zk.EventNodeDeleted, Path: p}
 	return nil
 }
 
-func (c *ZookeeperClientMock) Exists(p string) (bool, *zk.Stat, error) {
+func (c *ZookeeperClient) Exists(p string) (bool, *zk.Stat, error) {
 	if c.closed {
 		return false, nil, zk.ErrConnectionClosed
 	}
@@ -106,12 +106,12 @@ func (c *ZookeeperClientMock) Exists(p string) (bool, *zk.Stat, error) {
 	return parent.hasChild(path.Base(p)), nil, nil
 }
 
-func (c *ZookeeperClientMock) ExistsW(p string) (bool, *zk.Stat, <-chan zk.Event, error) {
+func (c *ZookeeperClient) ExistsW(p string) (bool, *zk.Stat, <-chan zk.Event, error) {
 	exists, stat, err := c.Exists(p)
 	return exists, stat, nil, err
 }
 
-func (c *ZookeeperClientMock) Get(p string) ([]byte, *zk.Stat, error) {
+func (c *ZookeeperClient) Get(p string) ([]byte, *zk.Stat, error) {
 	if c.closed {
 		return nil, nil, zk.ErrConnectionClosed
 	}
@@ -122,7 +122,7 @@ func (c *ZookeeperClientMock) Get(p string) ([]byte, *zk.Stat, error) {
 	return node.data, nil, nil
 }
 
-func (c *ZookeeperClientMock) GetW(p string) ([]byte, *zk.Stat, <-chan zk.Event, error) {
+func (c *ZookeeperClient) GetW(p string) ([]byte, *zk.Stat, <-chan zk.Event, error) {
 	if c.closed {
 		return nil, nil, nil, zk.ErrConnectionClosed
 	}
@@ -130,7 +130,7 @@ func (c *ZookeeperClientMock) GetW(p string) ([]byte, *zk.Stat, <-chan zk.Event,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	watcher := zookeeperMockNodeWatcher{
+	watcher := ZookeeperNodeWatcher{
 		client: c,
 		events: make(chan zk.Event),
 	}
@@ -138,7 +138,7 @@ func (c *ZookeeperClientMock) GetW(p string) ([]byte, *zk.Stat, <-chan zk.Event,
 	return node.data, nil, watcher.events, nil
 }
 
-func (c *ZookeeperClientMock) Children(p string) ([]string, *zk.Stat, error) {
+func (c *ZookeeperClient) Children(p string) ([]string, *zk.Stat, error) {
 	if c.closed {
 		return nil, nil, zk.ErrConnectionClosed
 	}
@@ -149,7 +149,7 @@ func (c *ZookeeperClientMock) Children(p string) ([]string, *zk.Stat, error) {
 	return node.getChildren(), nil, nil
 }
 
-func (c *ZookeeperClientMock) ChildrenW(p string) ([]string, *zk.Stat, <-chan zk.Event, error) {
+func (c *ZookeeperClient) ChildrenW(p string) ([]string, *zk.Stat, <-chan zk.Event, error) {
 	if c.closed {
 		return nil, nil, nil, zk.ErrConnectionClosed
 	}
@@ -157,7 +157,7 @@ func (c *ZookeeperClientMock) ChildrenW(p string) ([]string, *zk.Stat, <-chan zk
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	watcher := zookeeperMockNodeWatcher{
+	watcher := ZookeeperNodeWatcher{
 		client: c,
 		events: make(chan zk.Event, 1),
 	}
@@ -165,7 +165,7 @@ func (c *ZookeeperClientMock) ChildrenW(p string) ([]string, *zk.Stat, <-chan zk
 	return node.getChildren(), nil, watcher.events, err
 }
 
-func (c *ZookeeperClientMock) Close() {
+func (c *ZookeeperClient) Close() {
 	if c.closed {
 		panic("Can't close a client twice")
 	}
@@ -174,14 +174,14 @@ func (c *ZookeeperClientMock) Close() {
 	c.zk.root.clear(c)
 	c.events <- zk.Event{Type: zk.EventSession, State: zk.StateDisconnected}
 	close(c.events)
-	c.zk.events <- zk.Event{Type: zk.EventSession, State: zk.StateDisconnected}
+	c.zk.Events <- zk.Event{Type: zk.EventSession, State: zk.StateDisconnected}
 }
 
-func (z *ZookeeperMock) clear() {
+func (z *Zookeeper) Clear() {
 	z.root.clear(nil)
 }
 
-func (z *ZookeeperMock) getNode(p string) (*zookeeperMockNode, error) {
+func (z *Zookeeper) getNode(p string) (*ZookeeperNode, error) {
 	parent := path.Dir(p)
 	if parent == "/" {
 		return z.root, nil
@@ -193,44 +193,44 @@ func (z *ZookeeperMock) getNode(p string) (*zookeeperMockNode, error) {
 	return parentNode.getChild(path.Base(p))
 }
 
-type zookeeperMockNode struct {
+type ZookeeperNode struct {
 	data                []byte
-	children            map[string]*zookeeperMockNode
-	childrenWatchers    []zookeeperMockNodeWatcher
-	dataWatchers        []zookeeperMockNodeWatcher
-	ephemeralNodeClient *ZookeeperClientMock
+	children            map[string]*ZookeeperNode
+	childrenWatchers    []ZookeeperNodeWatcher
+	dataWatchers        []ZookeeperNodeWatcher
+	ephemeralNodeClient *ZookeeperClient
 }
 
-func newZookeeperMockNode(data []byte, ephemeralNodeClient *ZookeeperClientMock) *zookeeperMockNode {
-	return &zookeeperMockNode{
+func newZookeeperNode(data []byte, ephemeralNodeClient *ZookeeperClient) *ZookeeperNode {
+	return &ZookeeperNode{
 		data:                data,
-		children:            make(map[string]*zookeeperMockNode),
-		childrenWatchers:    make([]zookeeperMockNodeWatcher, 0),
-		dataWatchers:        make([]zookeeperMockNodeWatcher, 0),
+		children:            make(map[string]*ZookeeperNode),
+		childrenWatchers:    make([]ZookeeperNodeWatcher, 0),
+		dataWatchers:        make([]ZookeeperNodeWatcher, 0),
 		ephemeralNodeClient: ephemeralNodeClient,
 	}
 }
 
-func (n *zookeeperMockNode) setData(data []byte) {
+func (n *ZookeeperNode) setData(data []byte) {
 	n.data = data
 	n.sendDataEvent(zk.EventNodeDataChanged)
 }
 
-func (n *zookeeperMockNode) hasChild(name string) bool {
+func (n *ZookeeperNode) hasChild(name string) bool {
 	_, ok := n.children[name]
 	return ok
 }
 
-func (n *zookeeperMockNode) addChild(name string, data []byte, ephemeralNodeClient *ZookeeperClientMock) error {
+func (n *ZookeeperNode) addChild(name string, data []byte, ephemeralNodeClient *ZookeeperClient) error {
 	if n.hasChild(name) {
 		return zk.ErrNodeExists
 	}
-	n.children[name] = newZookeeperMockNode(data, ephemeralNodeClient)
+	n.children[name] = newZookeeperNode(data, ephemeralNodeClient)
 	n.sendChildrenEvent(zk.EventNodeChildrenChanged)
 	return nil
 }
 
-func (n *zookeeperMockNode) removeChild(name string) error {
+func (n *ZookeeperNode) removeChild(name string) error {
 	if !n.hasChild(name) {
 		return zk.ErrNoNode
 	}
@@ -246,14 +246,14 @@ func (n *zookeeperMockNode) removeChild(name string) error {
 	return nil
 }
 
-func (n *zookeeperMockNode) getChild(name string) (*zookeeperMockNode, error) {
+func (n *ZookeeperNode) getChild(name string) (*ZookeeperNode, error) {
 	if node, ok := n.children[name]; ok {
 		return node, nil
 	}
 	return nil, zk.ErrNoNode
 }
 
-func (n *zookeeperMockNode) getChildren() []string {
+func (n *ZookeeperNode) getChildren() []string {
 	names := make([]string, 0, len(n.children))
 	for name, _ := range n.children {
 		names = append(names, name)
@@ -261,7 +261,7 @@ func (n *zookeeperMockNode) getChildren() []string {
 	return names
 }
 
-func (n *zookeeperMockNode) sendChildrenEvent(childrenEventType zk.EventType) {
+func (n *ZookeeperNode) sendChildrenEvent(childrenEventType zk.EventType) {
 	childrenWatchers := n.childrenWatchers
 	n.childrenWatchers = nil
 	for _, watcher := range childrenWatchers {
@@ -269,7 +269,7 @@ func (n *zookeeperMockNode) sendChildrenEvent(childrenEventType zk.EventType) {
 		close(watcher.events)
 	}
 }
-func (n *zookeeperMockNode) sendDataEvent(dataEventType zk.EventType) {
+func (n *ZookeeperNode) sendDataEvent(dataEventType zk.EventType) {
 	dataWatchers := n.dataWatchers
 	n.dataWatchers = nil
 	for _, watcher := range dataWatchers {
@@ -278,7 +278,7 @@ func (n *zookeeperMockNode) sendDataEvent(dataEventType zk.EventType) {
 	}
 }
 
-func (n *zookeeperMockNode) clear(ephemeralNodeClient *ZookeeperClientMock) {
+func (n *ZookeeperNode) clear(ephemeralNodeClient *ZookeeperClient) {
 	for name, node := range n.children {
 		node.clear(ephemeralNodeClient)
 		if ephemeralNodeClient == nil || node.ephemeralNodeClient == ephemeralNodeClient {
@@ -287,9 +287,9 @@ func (n *zookeeperMockNode) clear(ephemeralNodeClient *ZookeeperClientMock) {
 	}
 }
 
-func (n *zookeeperMockNode) clearWatchers(client *ZookeeperClientMock) {
-	filterWatchers := func(watchers []zookeeperMockNodeWatcher) []zookeeperMockNodeWatcher {
-		result := make([]zookeeperMockNodeWatcher, 0, len(watchers))
+func (n *ZookeeperNode) clearWatchers(client *ZookeeperClient) {
+	filterWatchers := func(watchers []ZookeeperNodeWatcher) []ZookeeperNodeWatcher {
+		result := make([]ZookeeperNodeWatcher, 0, len(watchers))
 		for _, watcher := range watchers {
 			if watcher.client == client {
 				close(watcher.events)
@@ -306,7 +306,7 @@ func (n *zookeeperMockNode) clearWatchers(client *ZookeeperClientMock) {
 	}
 }
 
-type zookeeperMockNodeWatcher struct {
+type ZookeeperNodeWatcher struct {
 	events chan zk.Event
-	client *ZookeeperClientMock
+	client *ZookeeperClient
 }

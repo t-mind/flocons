@@ -1,7 +1,9 @@
 package http
 
-const CONTENT_TYPE string = "Content-Type"
-const CONTENT_LENGTH string = "Content-Length"
-const CONTENT_MODE string = "X-Content-Mode"
-const LAST_MODIFIED string = "Last-Modified"
-const LOCATION string = "Location"
+const (
+	CONTENT_TYPE   string = "Content-Type"
+	CONTENT_LENGTH string = "Content-Length"
+	CONTENT_MODE   string = "X-Content-Mode"
+	LAST_MODIFIED  string = "Last-Modified"
+	LOCATION       string = "Location"
+)

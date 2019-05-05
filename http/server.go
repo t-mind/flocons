@@ -20,7 +20,7 @@ const FILE_WORKER_POOL_SIZE int = 10
 type Server struct {
 	config         *config.Config
 	storage        *storage.Storage
-	topologyClient *cluster.TopologyClient
+	topologyClient cluster.TopologyClient
 	httpServer     *http.Server
 	fileJobs       chan serverJob
 }
@@ -31,7 +31,7 @@ type serverJob struct {
 	barrier *sync.Cond
 }
 
-func NewServer(config *config.Config, storage *storage.Storage, topologyClient *cluster.TopologyClient) (*Server, error) {
+func NewServer(config *config.Config, storage *storage.Storage, topologyClient cluster.TopologyClient) (*Server, error) {
 	if config.Node.Port == 0 {
 		return nil, NewInternalError("No port configured")
 	}
@@ -127,6 +127,9 @@ func (s *Server) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) CreateRegularFile(w http.ResponseWriter, r *http.Request) {
+	if s.distributeRequestIfPossible(w, r) {
+		return
+	}
 	p := r.URL.Path[len(FILES_PREFIX):]
 	mode := headerToFileMode(r.Header)
 	size := r.ContentLength
@@ -151,7 +154,12 @@ func (s *Server) GetFile(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path[len(FILES_PREFIX):]
 	fi, err := s.storage.GetFile(p)
 	if err != nil {
-		returnError(err, w)
+		// We didn't find the file, maybe it is not still synchronized but
+		// if it was created, it is certainly on the node reponsible for it
+		// let's try to dispatch the request
+		if !s.distributeRequestIfPossible(w, r) {
+			returnError(err, w)
+		}
 		return
 	}
 	fileInfoToHeader(fi, w.Header())
@@ -161,7 +169,12 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path[len(FILES_PREFIX):]
 	fi, err := s.storage.GetFile(p)
 	if err != nil {
-		returnError(err, w)
+		// We didn't find the file, maybe it is not still synchronized but
+		// if it was created, it is certainly on the node reponsible for it
+		// let's try to dispatch the request
+		if !s.distributeRequestIfPossible(w, r) {
+			returnError(err, w)
+		}
 		return
 	}
 	var data []byte
@@ -169,6 +182,8 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 		storageFileInfo, _ := fi.(*file.FileInfo)
 		data, err = storageFileInfo.Data()
 		if err != nil {
+			// We don't have the data, let's try to redirect to the node responsible
+			// or any other node in the same shard
 			if !s.tryRedirectToNode(w, r, storageFileInfo.Node(), storageFileInfo.Shard()) {
 				returnError(err, w)
 			}
@@ -191,49 +206,65 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func (s *Server) tryRedirectToNode(w http.ResponseWriter, r *http.Request, node string, shard string) bool {
-	logger.Debugf("Try to redirect query to node %s of shard %s", node, shard)
-	address := ""
+func (s *Server) distributeRequestIfPossible(w http.ResponseWriter, r *http.Request) bool {
+	if _, alreadyTraversed := r.URL.Query()[TRAVERSED_NODE_PARAMETER]; alreadyTraversed {
+		return false
+	}
+	p := r.URL.Path[len(FILES_PREFIX):]
+	node := s.topologyClient.GetNodeForObject(p)
+	if node == nil || node.Name == s.config.Node.Name {
+		return false
+	}
+	s.redirectToNode(w, r, node)
+	return true
+}
+
+func (s *Server) tryRedirectToNode(w http.ResponseWriter, r *http.Request, nodeName string, shard string) bool {
+	logger.Debugf("Try to redirect query to node %s of shard %s", nodeName, shard)
+	var node *cluster.NodeInfo
 	traversedNodes := []string{s.config.Node.Name}
 	query := r.URL.Query()
 	if nodes, ok := query[TRAVERSED_NODE_PARAMETER]; ok {
 		traversedNodes = append(traversedNodes, nodes...)
 	}
-	nodeAlreadyTraversed := sort.SearchStrings(traversedNodes, node) != len(traversedNodes)
+	nodeAlreadyTraversed := sort.SearchStrings(traversedNodes, nodeName) != len(traversedNodes)
 	if !nodeAlreadyTraversed {
-		logger.Debugf("Not not %s yed traversed, let's try to find info online", node)
+		logger.Debugf("Not not %s yed traversed, let's try to find info online", nodeName)
 		// We didn't tried this node yet, let's see if it is online
-		if nodeInfo, found := s.topologyClient.Nodes[node]; found {
-			address = nodeInfo.Address
+		if nodeInfo, found := s.topologyClient.Nodes()[nodeName]; found {
+			node = nodeInfo
 		}
 	}
-	if address == "" {
+	if node == nil {
 		// We already tried this node or it is not online, let's look for another node in the same shard
 		logger.Debugf("Look in shard %s for node not in %v", shard, traversedNodes)
-		for _, nodeInfo := range s.topologyClient.Nodes {
+		for _, nodeInfo := range s.topologyClient.Nodes() {
 			if nodeInfo.Shard == shard && sort.SearchStrings(traversedNodes, nodeInfo.Name) == len(traversedNodes) {
-				address = nodeInfo.Address
+				node = nodeInfo
 				break
 			}
 		}
 	}
-
-	if address != "" {
-		uri := r.URL.String()
-		uri = address + uri[strings.Index(uri, FILES_PREFIX):]
-		if strings.Index(uri, "?") == -1 {
-			uri += "?"
-		} else {
-			uri += "&"
-		}
-		uri += TRAVERSED_NODE_PARAMETER + "=" + s.config.Node.Name
-
-		logger.Debugf("Redirect to URL %s", uri)
-		w.Header().Set(LOCATION, uri)
-		w.WriteHeader(http.StatusTemporaryRedirect)
+	if node != nil {
+		s.redirectToNode(w, r, node)
 		return true
 	}
 	return false
+}
+
+func (s *Server) redirectToNode(w http.ResponseWriter, r *http.Request, node *cluster.NodeInfo) {
+	uri := r.URL.String()
+	uri = node.Address + uri[strings.Index(uri, FILES_PREFIX):]
+	if strings.Index(uri, "?") == -1 {
+		uri += "?"
+	} else {
+		uri += "&"
+	}
+	uri += TRAVERSED_NODE_PARAMETER + "=" + s.config.Node.Name
+
+	logger.Debugf("Redirect to URL %s", uri)
+	w.Header().Set(LOCATION, uri)
+	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
 func (s *Server) Close() {

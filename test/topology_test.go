@@ -10,6 +10,7 @@ import (
 
 	"github.com/macq/flocons/cluster"
 	"github.com/macq/flocons/config"
+	"github.com/macq/flocons/test/mock"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -25,14 +26,14 @@ func createConfig(t *testing.T, number int) *config.Config {
 
 func TestMultipleTopologyClients(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	mock := NewZookeeperMock()
-	defer mock.clear()
+	zookeeper := mock.NewZookeeper()
+	defer zookeeper.Clear()
 	numClients := 5
-	clients := make([]*cluster.TopologyClient, numClients)
+	clients := make([]cluster.TopologyClient, numClients)
 	paths := make([]string, numClients)
 	pathCreated := make([]bool, numClients)
 	for i := 0; i < numClients; i++ {
-		clients[i] = cluster.NewClientWithZookeperClientFactory(createConfig(t, i), mock.GetFactory())
+		clients[i] = cluster.NewClientWithZookeperClientFactory(createConfig(t, i), zookeeper.GetFactory(), &mock.NullDispatcher{})
 		defer clients[i].Close()
 		paths[i] = fmt.Sprintf("/flocons/test/node-%d", i)
 	}
@@ -42,7 +43,7 @@ func TestMultipleTopologyClients(t *testing.T) {
 loop:
 	for {
 		select {
-		case event, more := <-mock.events:
+		case event, more := <-zookeeper.Events:
 			if !more {
 				break loop
 			}
@@ -72,14 +73,15 @@ loop:
 		}
 	}
 	for i, client := range clients {
-		for j, otherClient := range clients {
+		for j, _ := range clients {
 			if i == j {
 				continue
 			}
-			node, ok := client.Nodes[otherClient.CurrentNodeName]
+			otherClientNodeName := fmt.Sprintf("node-%d", j)
+			node, ok := client.Nodes()[otherClientNodeName]
 			if !ok {
 				t.Errorf("Client %d has not discovered client %d", i, j)
-			} else if node.Name != otherClient.CurrentNodeName {
+			} else if node.Name != otherClientNodeName {
 				t.Errorf("Client %d info seems badly encoded", j)
 			}
 		}
@@ -93,7 +95,7 @@ loop:
 loop2:
 	for {
 		select {
-		case event, more := <-mock.events:
+		case event, more := <-zookeeper.Events:
 			if !more {
 				break loop2
 			}
@@ -111,11 +113,11 @@ loop2:
 	if !closeDetected {
 		t.Error("Client close has not been detected")
 	}
-	if len(clients[0].Nodes) > 0 {
+	if len(clients[0].Nodes()) > 0 {
 		t.Error("Client 0 node list is not empty")
 	}
 	for i, client := range clients {
-		if _, ok := client.Nodes[clients[0].CurrentNodeName]; ok && i != 0 {
+		if _, ok := client.Nodes()["node-0"]; ok && i != 0 {
 			t.Errorf("Client %d has stil discovered client 0", i)
 		}
 	}

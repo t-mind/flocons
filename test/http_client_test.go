@@ -7,9 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/macq/flocons/cluster"
-
 	"github.com/macq/flocons/storage"
+	"github.com/macq/flocons/test/mock"
 
 	"github.com/macq/flocons/config"
 	"github.com/macq/flocons/http"
@@ -33,7 +32,7 @@ func initServer(t *testing.T) *http.Server {
 		t.Errorf("Could not instantiate storage: %s", err)
 	}
 
-	server, err := http.NewServer(config, storage, &cluster.TopologyClient{Nodes: make(map[string]*cluster.NodeInfo)})
+	server, err := http.NewServer(config, storage, &mock.NullTopologyClient{})
 	if err != nil {
 		t.Errorf("Could instantiate server: %s", err)
 		t.FailNow()

@@ -13,47 +13,68 @@ import (
 
 const RETRY_TIMEOUT time.Duration = 5000 * time.Millisecond
 
-type TopologyClient struct {
-	Nodes           map[string]*NodeInfo
-	CurrentNodeName string
+type TopologyClient interface {
+	Nodes() map[string]*NodeInfo
+	GetNodeForObject(p string) *NodeInfo
+	Close()
+}
+
+type topologyClient struct {
+	nodes           map[string]*NodeInfo
+	currentNodeName string
 	config          *config.Config
 	zkFactory       ZookeeperClientFactory
 	zkClient        ZookeeperClient
 	zkEvents        <-chan zk.Event
-	zkClientLock    *sync.Mutex
 	zkPath          string
 	childrenEvent   <-chan zk.Event
+	dispatcher      Dispatcher
+	zkClientLock    *sync.RWMutex
 	cancel          context.CancelFunc
 }
 
 type ZookeeperClientFactory func(servers []string, sessionTimeout time.Duration) (ZookeeperClient, <-chan zk.Event, error)
 
-func NewClient(config *config.Config) *TopologyClient {
+func NewClient(config *config.Config, dispatcher Dispatcher) TopologyClient {
 	return NewClientWithZookeperClientFactory(config, func(servers []string, sessionTimeout time.Duration) (ZookeeperClient, <-chan zk.Event, error) {
 		return zk.Connect(servers, time.Second)
-	})
+	}, dispatcher)
 }
 
-func NewClientWithZookeperClientFactory(config *config.Config, factory ZookeeperClientFactory) *TopologyClient {
+func NewClientWithZookeperClientFactory(config *config.Config, factory ZookeeperClientFactory, dispatcher Dispatcher) TopologyClient {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
-	client := TopologyClient{
-		Nodes:           make(map[string]*NodeInfo, 0),
-		CurrentNodeName: config.Node.Name,
+	client := topologyClient{
+		nodes:           make(map[string]*NodeInfo, 0),
+		currentNodeName: config.Node.Name,
 		config:          config,
 		zkFactory:       factory,
 		zkClient:        nil,
 		zkEvents:        nil,
-		zkClientLock:    &sync.Mutex{},
 		zkPath:          path.Join("/flocons", config.Namespace, config.Node.Name),
+		dispatcher:      dispatcher,
+		zkClientLock:    &sync.RWMutex{},
 		cancel:          cancel,
 	}
 	go client.connect(ctx)
 	return &client
 }
 
-func (c *TopologyClient) connect(ctx context.Context) {
-	logger.Debugf("Client for node %s start connection to zookeeper", c.CurrentNodeName)
+func (c *topologyClient) Nodes() map[string]*NodeInfo {
+	return c.nodes
+}
+
+func (c *topologyClient) GetNodeForObject(p string) *NodeInfo {
+	nodeName, _ := c.dispatcher.Get(p)
+	if nodeName != "" {
+		node, _ := c.nodes[nodeName]
+		return node
+	}
+	return nil
+}
+
+func (c *topologyClient) connect(ctx context.Context) {
+	logger.Debugf("Client for node %s start connection to zookeeper", c.currentNodeName)
 	for {
 		if err := c.doConnect(); err == nil {
 			c.watchConnection(ctx)
@@ -63,7 +84,7 @@ func (c *TopologyClient) connect(ctx context.Context) {
 		c.zkEvents = nil
 		c.zkClientLock.Unlock()
 		if ctx.Err() == context.Canceled {
-			logger.Infof("Client for node %s terminated", c.CurrentNodeName)
+			logger.Infof("Client for node %s terminated", c.currentNodeName)
 			return
 		}
 		logger.Infof("Will retry a connection to zookeeper in %d ms\n", RETRY_TIMEOUT)
@@ -71,22 +92,22 @@ func (c *TopologyClient) connect(ctx context.Context) {
 	}
 }
 
-func (c *TopologyClient) doConnect() error {
-	c.zkClientLock.Lock()
-	defer c.zkClientLock.Unlock()
+func (c *topologyClient) doConnect() error {
+	c.zkClientLock.RLock()
+	defer c.zkClientLock.RUnlock()
 	zkClient, zkEvents, err := c.zkFactory(c.config.Zookeeper, time.Second)
 	if err != nil {
 		logger.Errorf("Could not create zookeeper connection %s\n", err)
 		return err
 	} else {
-		logger.Debugf("Client for node %s created connection to zookeeper", c.CurrentNodeName)
+		logger.Debugf("Client for node %s created connection to zookeeper", c.currentNodeName)
 		c.zkClient = zkClient
 		c.zkEvents = zkEvents
 	}
 	return nil
 }
 
-func (c *TopologyClient) watchConnection(ctx context.Context) {
+func (c *topologyClient) watchConnection(ctx context.Context) {
 	for {
 		select {
 		case event, more := <-c.zkEvents:
@@ -96,11 +117,11 @@ func (c *TopologyClient) watchConnection(ctx context.Context) {
 			if event.Type == zk.EventSession {
 				switch event.State {
 				case zk.StateDisconnected:
-					logger.Warnf("Client for node %s disconnected from zookeeper", c.CurrentNodeName)
+					logger.Warnf("Client for node %s disconnected from zookeeper", c.currentNodeName)
 					c.clear()
 					return
 				case zk.StateConnected:
-					logger.Infof("Client for node %s connected to zookeeper", c.CurrentNodeName)
+					logger.Infof("Client for node %s connected to zookeeper", c.currentNodeName)
 					if err := c.startNodeManagement(); err != nil {
 						logger.Errorf("Could not start node watching %s", err)
 						c.zkClient.Close()
@@ -114,7 +135,7 @@ func (c *TopologyClient) watchConnection(ctx context.Context) {
 	}
 }
 
-func (c *TopologyClient) startNodeManagement() error {
+func (c *topologyClient) startNodeManagement() error {
 	var createPath func(p string) error
 	createPath = func(p string) error {
 		logger.Debugf("Create basic path %s", p)
@@ -141,17 +162,13 @@ func (c *TopologyClient) startNodeManagement() error {
 	return nil
 }
 
-func (c *TopologyClient) updateNodeInfo() error {
+func (c *topologyClient) updateNodeInfo() error {
 	nodeInfo := NodeInfo{
 		Name:    c.config.Node.Name,
 		Address: c.config.Node.ExternalAddress,
 		Shard:   c.config.Node.Shard,
 	}
-	js, jserr := json.Marshal(nodeInfo)
-	if jserr != nil {
-		logger.Fatalf("COULD NOT MARSHALL JSON %s", jserr)
-	}
-	logger.Infof("CREATE NODE %s WITH JS %s", c.zkPath, js)
+	js, _ := json.Marshal(nodeInfo)
 	_, err := c.zkClient.Create(c.zkPath, js, zk.FlagEphemeral, zk.WorldACL(zk.PermAll))
 	if err == zk.ErrNodeExists {
 		_, err = c.zkClient.Set(c.zkPath, js, 0)
@@ -159,14 +176,14 @@ func (c *TopologyClient) updateNodeInfo() error {
 	return err
 }
 
-func (c *TopologyClient) watchNodes() {
+func (c *topologyClient) watchNodes() {
 	for {
 		channel, err := c.getNodesAndWatch()
 		if err != nil {
 			return
 		}
 		for event := range channel {
-			logger.Debugf("Received event for node %s in node children of type %s for path %s", c.CurrentNodeName, event.Type, event.Path)
+			logger.Debugf("Received event for node %s in node children of type %s for path %s", c.currentNodeName, event.Type, event.Path)
 			switch event.Type {
 			case zk.EventNotWatching:
 				logger.Warnf("watching closed")
@@ -178,9 +195,9 @@ func (c *TopologyClient) watchNodes() {
 	}
 }
 
-func (c *TopologyClient) getNodesAndWatch() (<-chan zk.Event, error) {
-	c.zkClientLock.Lock()
-	defer c.zkClientLock.Unlock()
+func (c *topologyClient) getNodesAndWatch() (<-chan zk.Event, error) {
+	c.zkClientLock.RLock()
+	defer c.zkClientLock.RUnlock()
 
 	dir := path.Dir(c.zkPath)
 	if c.zkClient == nil {
@@ -198,58 +215,60 @@ func (c *TopologyClient) getNodesAndWatch() (<-chan zk.Event, error) {
 	return channel, nil
 }
 
-func (c *TopologyClient) updateNodes(names []string) {
+func (c *topologyClient) updateNodes(names []string) {
 delLoop:
-	for key, _ := range c.Nodes {
+	for key, _ := range c.nodes {
 		for _, name := range names {
 			if name == key {
 				continue delLoop
 			}
 		}
 		c.removeNode(key)
-		delete(c.Nodes, key)
+		delete(c.nodes, key)
 	}
 	for _, name := range names {
 		if !c.hasNode(name) {
 			c.addNode(name)
 		}
 	}
+	c.dispatcher.Set(names)
 }
 
-func (c *TopologyClient) hasNode(name string) bool {
-	_, ok := c.Nodes[name]
+func (c *topologyClient) hasNode(name string) bool {
+	_, ok := c.nodes[name]
 	return ok
 }
 
-func (c *TopologyClient) addNode(name string) {
-	if name == c.CurrentNodeName {
+func (c *topologyClient) addNode(name string) {
+	if name == c.currentNodeName {
 		return
 	}
-	logger.Infof("Client for node %s has detected client for node %s", c.CurrentNodeName, name)
+	logger.Infof("Client for node %s has detected client for node %s", c.currentNodeName, name)
 	var node NodeInfo
 	data, _, _ := c.zkClient.Get(path.Join(path.Dir(c.zkPath), name))
 	json.Unmarshal(data, &node)
 	logger.Debugf("Client %s is in shard %s with address %s", node.Name, node.Shard, node.Address)
-	c.Nodes[name] = &node
+	c.nodes[name] = &node
 }
 
-func (c *TopologyClient) removeNode(name string) {
-	if name == c.CurrentNodeName {
+func (c *topologyClient) removeNode(name string) {
+	if name == c.currentNodeName {
 		return
 	}
-	logger.Infof("Client for node %s has seen disconnection of client for node %s", c.CurrentNodeName, name)
-	delete(c.Nodes, name)
+	logger.Infof("Client for node %s has seen disconnection of client for node %s", c.currentNodeName, name)
+	delete(c.nodes, name)
 }
 
-func (c *TopologyClient) clear() {
-	for key, _ := range c.Nodes {
-		delete(c.Nodes, key)
+func (c *topologyClient) clear() {
+	for key, _ := range c.nodes {
+		delete(c.nodes, key)
 	}
+	c.dispatcher.Clear()
 }
 
-func (c *TopologyClient) Close() {
-	c.zkClientLock.Lock()
-	defer c.zkClientLock.Unlock()
+func (c *topologyClient) Close() {
+	c.zkClientLock.RLock()
+	defer c.zkClientLock.RUnlock()
 	if c.zkClient != nil {
 		c.zkClient.Close()
 	}
