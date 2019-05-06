@@ -2,11 +2,13 @@ package http
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/macq/flocons/cluster"
 	"github.com/macq/flocons/config"
@@ -59,6 +61,11 @@ func NewServer(config *config.Config, storage *storage.Storage, topologyClient c
 }
 
 func (s *Server) start() {
+	listener, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		logger.Fatalf("Could not start listening to %s: %s", s.httpServer.Addr, err)
+	}
+
 	httpHandler, _ := s.httpServer.Handler.(*http.ServeMux)
 	httpHandler.HandleFunc(FILES_PREFIX+"/", func(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("Handle file request %s on node %s for ressource %s", r.Method, s.config.Node.Name, r.URL.Path)
@@ -81,7 +88,7 @@ func (s *Server) start() {
 
 	go func() {
 		logger.Infof("Start http server on port %d", s.config.Node.Port)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(tcpKeepAliveListener{listener.(*net.TCPListener)}); err != nil && err != http.ErrServerClosed {
 			logger.Fatalf("Http server failed %s", err)
 		}
 	}()
@@ -280,4 +287,23 @@ func (s *Server) CloseAndDestroyStorage() error {
 func returnError(err error, w http.ResponseWriter) {
 	w.WriteHeader(errorToHttpStatus(err))
 	w.Write([]byte(err.Error()))
+}
+
+// ** from http package **
+// tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
+// connections. It's used by ListenAndServe and ListenAndServeTLS so
+// dead TCP connections (e.g. closing laptop mid-download) eventually
+// go away.
+type tcpKeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+	tc, err := ln.AcceptTCP()
+	if err != nil {
+		return nil, err
+	}
+	tc.SetKeepAlive(true)
+	tc.SetKeepAlivePeriod(3 * time.Minute)
+	return tc, nil
 }
