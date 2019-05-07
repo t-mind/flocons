@@ -4,6 +4,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +28,7 @@ type Server struct {
 	topologyClient cluster.TopologyClient
 	httpServer     *http.Server
 	fileJobs       chan serverJob
+	httpClient     *http.Client
 }
 
 type serverJob struct {
@@ -55,6 +59,7 @@ func NewServer(config *config.Config, storage *storage.Storage, topologyClient c
 		topologyClient: topologyClient,
 		httpServer:     httpServer,
 		fileJobs:       make(chan serverJob),
+		httpClient:     &http.Client{},
 	}
 	server.start()
 	return &server, nil
@@ -123,9 +128,17 @@ func (s *Server) ServeFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) CreateDirectory(w http.ResponseWriter, r *http.Request) {
+	if s.distributeRequestIfPossible(w, r) {
+		return
+	}
 	p := r.URL.Path[len(FILES_PREFIX):]
 	mode := headerToFileMode(r.Header)
 	fi, err := s.storage.CreateDirectory(p, mode)
+	if err != nil && os.IsNotExist(err) {
+		if s.tryRecoverMissingDirectory(path.Dir(p)) {
+			fi, err = s.storage.CreateDirectory(p, mode)
+		}
+	}
 	if err != nil {
 		returnError(err, w)
 		return
@@ -150,6 +163,11 @@ func (s *Server) CreateRegularFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fi, err := s.storage.CreateRegularFile(p, mode, buffer)
+	if err != nil && os.IsNotExist(err) {
+		if s.tryRecoverMissingDirectory(path.Dir(p)) {
+			fi, err = s.storage.CreateRegularFile(p, mode, buffer)
+		}
+	}
 	if err != nil {
 		returnError(err, w)
 		return
@@ -224,6 +242,32 @@ func (s *Server) distributeRequestIfPossible(w http.ResponseWriter, r *http.Requ
 	}
 	s.redirectToNode(w, r, node)
 	return true
+}
+
+func (s *Server) tryRecoverMissingDirectory(directory string) bool {
+	node := s.topologyClient.GetNodeForObject(directory)
+	logger.Debugf("Directory %s has not been found on %s, let's try find it on %s", directory, s.config.Node.Name, node.Name)
+	if node == nil || node.Name == s.config.Node.Name {
+		return false
+	}
+	uri, _ := url.Parse(node.Address + path.Join(FILES_PREFIX, directory))
+	logger.Debugf("Url is %s", uri.String())
+	req, err := http.NewRequest("HEAD", uri.String(), nil)
+	if err != nil {
+		logger.Warnf("Directory not found %s", err)
+		return false
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		logger.Warnf("Directory not found %s", err)
+		return false
+	}
+	fi := headerToFileMode(resp.Header)
+	if !fi.IsDir() {
+		return false
+	}
+	_, err = s.storage.CreateDirectoryAndParents(directory, fi)
+	return err == nil
 }
 
 func (s *Server) tryRedirectToNode(w http.ResponseWriter, r *http.Request, nodeName string, shard string) bool {

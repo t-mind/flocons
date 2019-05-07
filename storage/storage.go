@@ -91,8 +91,18 @@ func (s *Storage) MakeAbsolute(p string) string {
 func (s *Storage) CreateDirectory(p string, mode os.FileMode) (os.FileInfo, error) {
 	mode |= 0700 // be sure that we will whatever be able to interact with this directory
 	fullPath := s.MakeAbsolute(p)
-	fmt.Printf("create directory %s with mode %o\n", fullPath, mode)
+	logger.Debugf("create directory %s with mode %o\n", fullPath, mode)
 	if err := os.Mkdir(fullPath, mode); err != nil {
+		return nil, err
+	}
+	return os.Stat(fullPath)
+}
+
+func (s *Storage) CreateDirectoryAndParents(p string, mode os.FileMode) (os.FileInfo, error) {
+	mode |= 0700 // be sure that we will whatever be able to interact with this directory
+	fullPath := s.MakeAbsolute(p)
+	logger.Debugf("create directory %s and parents with mode %o\n", fullPath, mode)
+	if err := os.MkdirAll(fullPath, mode); err != nil {
 		return nil, err
 	}
 	return os.Stat(fullPath)

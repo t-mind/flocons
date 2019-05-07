@@ -142,6 +142,7 @@ func TestDistributedIndexAndBadContainer(t *testing.T) {
 func TestSimpleDispatching(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
 	numFiles := 100
+	munDir := 5
 	mock := mock.NewZookeeper()
 	server1, client1, _ := createServerAndClient(t, 1, mock, true)
 	defer server1.CloseAndDestroyStorage()
@@ -151,14 +152,23 @@ func TestSimpleDispatching(t *testing.T) {
 	defer client2.Close()
 
 	testCreateDirectory(t, client1, "/dir")
-	testCreateDirectory(t, client2, "/dir")
+
+	for i := 0; i < munDir; i++ {
+		client := client1
+		if i%2 == 0 {
+			client = client2
+		}
+		dir := fmt.Sprintf("/dir/testDir%d", i)
+		testCreateDirectory(t, client, dir)
+	}
 
 	for i := 0; i < numFiles; i++ {
 		client := client1
 		if i%2 == 0 {
 			client = client2
 		}
-		testCreateFile(t, client, "/dir", fmt.Sprintf("testFile%d", i), fmt.Sprintf("testData%d", i))
+		dir := fmt.Sprintf("/dir/testDir%d", i%munDir)
+		testCreateFile(t, client, dir, fmt.Sprintf("testFile%d", i), fmt.Sprintf("testData%d", i))
 	}
 
 	for i := 0; i < numFiles; i++ {
@@ -166,6 +176,7 @@ func TestSimpleDispatching(t *testing.T) {
 		if i%2 != 0 {
 			client = client2
 		}
-		testReadFile(t, client, "/dir", fmt.Sprintf("testFile%d", i), fmt.Sprintf("testData%d", i))
+		dir := fmt.Sprintf("/dir/testDir%d", i%munDir)
+		testReadFile(t, client, dir, fmt.Sprintf("testFile%d", i), fmt.Sprintf("testData%d", i))
 	}
 }
