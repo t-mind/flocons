@@ -32,6 +32,7 @@ type RegularFileContainer struct {
 	Shard      string
 	Version    int
 	Number     int
+	Size       int64
 	path       string
 	config     *config.Config
 	writeFd    *os.File
@@ -40,8 +41,12 @@ type RegularFileContainer struct {
 	index      *RegularFileContainerIndex
 }
 
+// This function creates a new 'RegularFileContainer' object.
+// Either the unerlying files already exists, and just the container object is created
+// or the files don't exist, and it creates new empty ones. The later possibility is only valid for files belonging to the current node
 func NewRegularFileContainer(directory string, name string, config *config.Config, index *RegularFileContainerIndex) (*RegularFileContainer, error) {
 	fullpath := filepath.Join(directory, name)
+	logger.Debugf("Find container %s\n", fullpath)
 	parts := containerRegexp.FindStringSubmatch(name)
 	if parts == nil {
 		return nil, NewInternalError("Tried to create a container with name " + name + " which is invalid")
@@ -50,11 +55,13 @@ func NewRegularFileContainer(directory string, name string, config *config.Confi
 	node := parts[3]
 	version, _ := strconv.Atoi(parts[4])
 	number, _ := strconv.Atoi(parts[5])
+	var size int64
 
-	_, err := os.Stat(fullpath)
+	containerFileInfo, err := os.Stat(fullpath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
+
 	var index_err error
 	if index == nil {
 		index, index_err = FindRegularFileContainerIndex(directory, shard, node, number, config)
@@ -64,7 +71,7 @@ func NewRegularFileContainer(directory string, name string, config *config.Confi
 	}
 
 	if err != nil && index_err != nil {
-		// We didn't fint the container file neither the index file
+		// We didn't find the container file neither the index file
 		if config.Node.Name == node {
 			// This can be normal only if the file is from this node
 			f, err := os.Create(fullpath)
@@ -76,17 +83,24 @@ func NewRegularFileContainer(directory string, name string, config *config.Confi
 			if index_err != nil {
 				return nil, err
 			}
+			logger.Debugf("Created new regular file container %s\n", fullpath)
 		} else {
 			return nil, err
 		}
+	} else if containerFileInfo != nil {
+		size = containerFileInfo.Size()
+	} else {
+		size, _ = index.EstimatedContainerSize()
 	}
 
+	logger.Debugf("Succesfully found container %s\n", fullpath)
 	return &RegularFileContainer{
 		Name:       name,
 		Node:       node,
 		Shard:      shard,
 		Version:    version,
 		Number:     number,
+		Size:       size,
 		path:       fullpath,
 		config:     config,
 		writeMutex: &sync.Mutex{},
@@ -217,9 +231,7 @@ func (c *RegularFileContainer) CreateRegularFile(name string, mode os.FileMode, 
 
 	address, err := c.writeFd.Seek(0, os.SEEK_CUR)
 	if err != nil {
-		c.tarWriter.Close()
-		c.writeFd.Close()
-		c.writeFd = nil
+		c.Close()
 		return nil, err
 	}
 
@@ -248,6 +260,7 @@ func (c *RegularFileContainer) CreateRegularFile(name string, mode os.FileMode, 
 		}
 	}
 
+	c.Size, _ = c.writeFd.Seek(0, os.SEEK_CUR)
 	return fi, nil
 }
 
@@ -284,6 +297,24 @@ func (c *RegularFileContainer) ListFiles() ([]os.FileInfo, error) {
 		}
 	}
 	return files, nil
+}
+
+func (c *RegularFileContainer) IsWriteable(config *config.Config) bool {
+	if c.Node != config.Node.Name || c.index == nil {
+		return false
+	}
+
+	var size int64
+	if c.writeFd == nil {
+		containerFileInfo, err := os.Stat(c.path)
+		if err != nil {
+			return false
+		}
+		size = containerFileInfo.Size()
+	} else {
+		size = c.Size
+	}
+	return size < config.Storage.MaxContainerSizeInByes
 }
 
 func (c *RegularFileContainer) Close() {

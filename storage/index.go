@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/csv"
+	"math"
 
 	"github.com/t-mind/flocons/config"
 	"github.com/t-mind/flocons/file"
@@ -157,6 +158,18 @@ func (i *RegularFileContainerIndex) ListFiles() ([]os.FileInfo, error) {
 		files = append(files, file)
 	}
 	return files, nil
+}
+
+func (i *RegularFileContainerIndex) EstimatedContainerSize() (int64, error) {
+	if err := i.updateEntries(); err != nil {
+		fmt.Println(err)
+	}
+	var size float64
+	for _, f := range i.entries {
+		storageFileInfo, _ := f.(*file.FileInfo)
+		size = math.Max(size, float64(storageFileInfo.Address()+storageFileInfo.Size()))
+	}
+	return int64(size), nil
 }
 
 func (i *RegularFileContainerIndex) updateEntries() error {

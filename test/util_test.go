@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ type FileService interface {
 
 func testCreateDirectory(t *testing.T, service FileService, dir string) {
 	testName := filepath.Base(dir)
-	fmt.Printf("Create temp directory %s\n", testName)
+	fmt.Printf("Create temp directory %s for tests\n", testName)
 	f, err := service.CreateDirectory(dir, 0755)
 	if err != nil {
 		t.Errorf("Could not create directory %s, %s", dir, err)
@@ -57,7 +58,11 @@ func testGetDirectory(t *testing.T, service FileService, dir string) {
 }
 
 func testCreateFile(t *testing.T, service FileService, dir string, name string, data string) {
-	f, err := service.CreateRegularFile(filepath.Join(dir, name), 0644, []byte(data))
+	testCreateFileWithBytes(t, service, dir, name, []byte(data))
+}
+
+func testCreateFileWithBytes(t *testing.T, service FileService, dir string, name string, data []byte) {
+	f, err := service.CreateRegularFile(filepath.Join(dir, name), 0644, data)
 	if err != nil {
 		t.Errorf("Could not create file %s: %s", name, err)
 		t.FailNow()
@@ -68,6 +73,10 @@ func testCreateFile(t *testing.T, service FileService, dir string, name string, 
 }
 
 func testReadFile(t *testing.T, service FileService, dir string, name string, testData string) os.FileInfo {
+	return testReadFileWithBytes(t, service, dir, name, []byte(testData))
+}
+
+func testReadFileWithBytes(t *testing.T, service FileService, dir string, name string, testData []byte) os.FileInfo {
 	f, err := service.GetRegularFile(filepath.Join(dir, name))
 	if err != nil {
 		t.Errorf("Could get back file %s: %s", name, err)
@@ -79,11 +88,11 @@ func testReadFile(t *testing.T, service FileService, dir string, name string, te
 	}
 
 	if sf, ok := f.(*file.FileInfo); ok {
-		if testData != "" { // empty string is used when we don't want to test data
+		if len(testData) != 0 { // empty string is used when we don't want to test data
 			data, err := sf.Data()
 			if err != nil {
 				t.Errorf("Could not get data: %s", err)
-			} else if string(data) != testData {
+			} else if bytes.Compare(testData, data) != 0 {
 				t.Errorf("Data value does not match: %s != %s", data, testData)
 			}
 		}

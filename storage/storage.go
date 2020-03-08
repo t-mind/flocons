@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -25,9 +24,10 @@ type Storage struct {
 }
 
 type DirectoryCacheEntry struct {
-	writeContainer *RegularFileContainer
-	containers     map[string]*RegularFileContainer
-	updateMutex    sync.Mutex
+	writeContainer            *RegularFileContainer
+	containers                map[string]*RegularFileContainer
+	containersUpdateMutex     sync.Mutex
+	writeContainerUpdateMutex sync.Mutex
 }
 
 type regularFileContainerWalker struct {
@@ -55,8 +55,10 @@ func NewStorage(config *config.Config) (*Storage, error) {
 	}
 	s.directoryCache.OnEvicted = func(key lru.Key, value interface{}) {
 		cacheEntry, _ := value.(*DirectoryCacheEntry)
-		cacheEntry.updateMutex.Lock()
-		defer cacheEntry.updateMutex.Unlock()
+		cacheEntry.containersUpdateMutex.Lock()
+		defer cacheEntry.containersUpdateMutex.Unlock()
+		cacheEntry.writeContainerUpdateMutex.Lock()
+		defer cacheEntry.writeContainerUpdateMutex.Unlock()
 		if cacheEntry.writeContainer != nil {
 			cacheEntry.writeContainer.Close()
 		}
@@ -127,7 +129,9 @@ func (s *Storage) CreateRegularFile(p string, mode os.FileMode, data []byte) (os
 		return nil, err
 	}
 	cacheEntry := s.getDirectoryCacheEntry(directory)
-	s.ensureCacheEntryWriteContainer(directory, cacheEntry)
+	if err := s.ensureCacheEntryWriteContainer(directory, cacheEntry); err != nil {
+		return nil, err
+	}
 	return (*cacheEntry.writeContainer).CreateRegularFile(filepath.Base(p), mode, data)
 }
 
@@ -185,35 +189,69 @@ func (s *Storage) getDirectoryCacheEntry(directory string) *DirectoryCacheEntry 
 	} else {
 		var nullContainer *RegularFileContainer
 		cacheEntry = &DirectoryCacheEntry{
-			containers:     make(map[string]*RegularFileContainer),
-			writeContainer: nullContainer,
-			updateMutex:    sync.Mutex{},
+			containers:                make(map[string]*RegularFileContainer),
+			writeContainer:            nullContainer,
+			containersUpdateMutex:     sync.Mutex{},
+			writeContainerUpdateMutex: sync.Mutex{},
 		}
 		s.directoryCache.Add(directory, cacheEntry)
 	}
 	return cacheEntry
 }
 
-func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry *DirectoryCacheEntry) {
-	cacheEntry.updateMutex.Lock()
-	defer cacheEntry.updateMutex.Unlock()
+// Ensure that we have a container open for writing
+// If there is already one and it is not full, it returns this container
+// If there is one but full, it closes and creates a new one
+// If there is none yet, it tries to find the container with the highest number and opens it if not full (or corrupted)
+// If none it found, it creates a new one
+func (s *Storage) ensureCacheEntryWriteContainer(directory string, cacheEntry *DirectoryCacheEntry) error {
+	cacheEntry.writeContainerUpdateMutex.Lock()
+	defer cacheEntry.writeContainerUpdateMutex.Unlock()
+
+	// First let's check if the actual container is not full
+	if cacheEntry.writeContainer != nil && !cacheEntry.writeContainer.IsWriteable(s.config) {
+		logger.Infof("Container %s is full -> close it\n", cacheEntry.writeContainer.Name)
+		cacheEntry.writeContainer.Close()
+		cacheEntry.writeContainer = nil
+	}
+
 	if cacheEntry.writeContainer == nil {
+		logger.Debugf("No container opened to write in directory %s on node %s -> let's search for one\n", s.config.Storage.Path, s.config.Node.Name)
 		var writeContainer *RegularFileContainer
-		for _, container := range cacheEntry.containers {
-			if container.Node == s.config.Node.Name && (writeContainer == nil || writeContainer.Number < container.Number) {
+		var maxNumber int = 0
+		walker := newRegularFileContainerWalkerFromCacheEntry(s, directory, cacheEntry)
+		for {
+			container, err := walker.Next()
+			if err != nil {
+				return err
+			}
+			if container == nil {
+				break
+			}
+			logger.Debugf("Walk through container %s\n", container.Name)
+			if container.Node == s.config.Node.Name && container.Number > maxNumber {
+				maxNumber = container.Number
+			}
+			if container.IsWriteable(s.config) && (writeContainer == nil || writeContainer.Number < container.Number) {
+				logger.Debugf("Found one valid container %s\n", container.Name)
 				writeContainer = container
 			}
 		}
 		if writeContainer == nil {
-			name := NewRegularFileContainerName(s.config.Node.Shard, s.config.Node.Name, 1)
-			writeContainer, err := NewRegularFileContainer(s.MakeAbsolute(directory), name, s.config, nil)
+			cacheEntry.containersUpdateMutex.Lock()
+			defer cacheEntry.containersUpdateMutex.Unlock()
+			name := NewRegularFileContainerName(s.config.Node.Shard, s.config.Node.Name, maxNumber+1)
+			logger.Infof("No container available to write in directory %s on node %s -> let's create %s\n", s.config.Storage.Path, s.config.Node.Name, name)
+			newWriteContainer, err := NewRegularFileContainer(s.MakeAbsolute(directory), name, s.config, nil)
 			if err != nil {
 				logger.Fatalf("Could not create new regular file container %s", err)
 			}
-			cacheEntry.containers[name] = writeContainer
-			cacheEntry.writeContainer = writeContainer
+			cacheEntry.containers[name] = newWriteContainer
+			writeContainer = newWriteContainer
 		}
+		cacheEntry.writeContainer = writeContainer
 	}
+	return nil
 }
 
 func (s *Storage) ReadDir(directory string) ([]os.FileInfo, error) {
@@ -271,7 +309,10 @@ func (s *Storage) Destroy() error {
 }
 
 func newRegularFileContainerWalker(s *Storage, directory string) *regularFileContainerWalker {
-	entry := s.getDirectoryCacheEntry(directory)
+	return newRegularFileContainerWalkerFromCacheEntry(s, directory, s.getDirectoryCacheEntry(directory))
+}
+
+func newRegularFileContainerWalkerFromCacheEntry(s *Storage, directory string, entry *DirectoryCacheEntry) *regularFileContainerWalker {
 	cacheKeys := make([]string, 0, len(entry.containers))
 	for index, _ := range entry.containers {
 		cacheKeys = append(cacheKeys, index)
@@ -301,11 +342,12 @@ func (w *regularFileContainerWalker) Next() (*RegularFileContainer, error) {
 	}
 
 	// Be sure not to update the mutex with twice the same container
-	w.cacheEntry.updateMutex.Lock()
-	defer w.cacheEntry.updateMutex.Unlock()
+	w.cacheEntry.containersUpdateMutex.Lock()
+	defer w.cacheEntry.containersUpdateMutex.Unlock()
 
 	// Let's lookup the directory for not yet managed containers or lonely indexes
 	containers := w.cacheEntry.containers
+	var nextContainer *RegularFileContainer
 	for ; w.currentIndex < len(w.cacheKeys)+len(w.files); w.currentIndex++ {
 		file := w.files[w.currentIndex-len(w.cacheKeys)]
 		if file.IsDir() {
@@ -328,7 +370,7 @@ func (w *regularFileContainerWalker) Next() (*RegularFileContainer, error) {
 				// We found a lonely index
 				index, err := NewRegularFileContainerIndex(fullpath, name, w.storage.config)
 				if err != nil {
-					fmt.Println(err)
+					logger.Errorln(err)
 					continue
 				}
 				// Let's defined the name of the empty refular file container that will be created
@@ -338,12 +380,14 @@ func (w *regularFileContainerWalker) Next() (*RegularFileContainer, error) {
 		if !found {
 			container, err := NewRegularFileContainer(fullpath, name, w.storage.config, index)
 			if err != nil {
-				fmt.Println(err)
+				logger.Errorln(err)
 			} else {
 				containers[name] = container
-				return container, nil
+				if nextContainer == nil {
+					nextContainer = container // still, let's continue to update the cache entry
+				}
 			}
 		}
 	}
-	return nil, nil
+	return nextContainer, nil
 }

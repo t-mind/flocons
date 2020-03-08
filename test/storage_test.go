@@ -3,10 +3,14 @@ package test
 import (
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	. "github.com/docker/go-units"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/t-mind/flocons/config"
 	"github.com/t-mind/flocons/storage"
@@ -82,6 +86,7 @@ func TestStorageLs(t *testing.T) {
 	testReadDir(t, storage)
 }
 func TestStorageConcurrentBasic(t *testing.T) {
+	log.SetLevel(log.DebugLevel)
 	ss := initStorages(t, 2)
 	defer ss[0].Destroy()
 	defer ss[1].Close()
@@ -97,6 +102,97 @@ func TestStorageConcurrentBasic(t *testing.T) {
 	testReadFile(t, ss[1], testDir, "testFile2", "testData2")
 	testCreateFile(t, ss[1], testDir, "testFile4", "testData4")
 	testReadFile(t, ss[0], testDir, "testFile4", "testData4")
+}
+
+func TestExceedContainerCapacity(t *testing.T) {
+	ss := initStorages(t, 1)
+	s := ss[0]
+	defer s.Destroy()
+
+	testDir := "/testDir"
+	fileSize, _ := FromHumanSize("10MB")
+	content := make([]byte, fileSize)
+	rand.Read(content)
+
+	testCreateDirectory(t, s, testDir)
+	for i := 0; i < 55; i++ {
+		testCreateFileWithBytes(t, s, testDir, fmt.Sprintf("testFile%d", i), content)
+	}
+	for i := 0; i < 55; i++ {
+		testReadFileWithBytes(t, s, testDir, fmt.Sprintf("testFile%d", i), content)
+	}
+	dirPath := s.MakeAbsolute(testDir)
+	indexFiles, _ := filepath.Glob(filepath.Join(dirPath, "index*"))
+	containerFiles, _ := filepath.Glob(filepath.Join(dirPath, "*.tar"))
+
+	expectedNumber := 6
+	if len(indexFiles) != expectedNumber {
+		t.Errorf("Expected %d index created, found only %d", expectedNumber, len(indexFiles))
+		t.FailNow()
+	}
+	if len(containerFiles) != expectedNumber {
+		t.Errorf("Expected %d containers created, found only %d", expectedNumber, len(containerFiles))
+		t.FailNow()
+	}
+}
+
+func TestCloseAndOpenStorage(t *testing.T) {
+	log.SetLevel(log.DebugLevel)
+	ss := initStorages(t, 1)
+	s := ss[0]
+	defer s.Destroy()
+
+	testDir := "/testDir"
+	fileSize, _ := FromHumanSize("10MB")
+	content := make([]byte, fileSize)
+	rand.Read(content)
+
+	testCreateDirectory(t, s, testDir)
+	dirPath := s.MakeAbsolute(testDir)
+
+	testCreateFileWithBytes(t, s, testDir, "testFile", content)
+
+	s.Close()
+
+	containerFiles, _ := filepath.Glob(filepath.Join(dirPath, "*.tar"))
+
+	testCreateFileWithBytes(t, s, testDir, "testFile1", content)
+
+	testReadFileWithBytes(t, s, testDir, "testFile", content)
+	testReadFileWithBytes(t, s, testDir, "testFile1", content)
+
+	containerFiles2, _ := filepath.Glob(filepath.Join(dirPath, "*.tar"))
+	if len(containerFiles) != len(containerFiles2) {
+		t.Errorf("New container created when closing and reopening file ! %d containers -> %d containers", len(containerFiles), len(containerFiles2))
+	}
+
+	for i := 0; i < 10; i++ {
+		testCreateFileWithBytes(t, s, testDir, fmt.Sprintf("testFile-%d", i), content)
+	}
+
+	containerFiles3, _ := filepath.Glob(filepath.Join(dirPath, "*.tar"))
+	var lastContainerInfo os.FileInfo
+	var lastContainerFileName string
+	for _, file := range containerFiles3 {
+		if file != containerFiles[0] {
+			lastContainerInfo, _ = os.Stat(file)
+			lastContainerFileName = file
+		}
+	}
+	fmt.Printf("LAST CONTAINER SIZE %d\n", lastContainerInfo.Size())
+
+	s.Close()
+
+	testCreateFileWithBytes(t, s, testDir, "testFile2", content)
+	containerFiles4, _ := filepath.Glob(filepath.Join(dirPath, "*.tar"))
+	if len(containerFiles3) != len(containerFiles4) {
+		t.Errorf("New container created when closing and reopening file ! %d containers -> %d containers", len(containerFiles3), len(containerFiles4))
+	}
+
+	newLastContainerInfo, _ := os.Stat(lastContainerFileName)
+	if lastContainerInfo.Size() == newLastContainerInfo.Size() {
+		t.Errorf("File has been happened to the wrong container. Container size %d == %d", lastContainerInfo.Size(), newLastContainerInfo.Size())
+	}
 }
 
 func TestStorageMissingIndexes(t *testing.T) {
@@ -122,6 +218,7 @@ func TestStorageMissingIndexes(t *testing.T) {
 }
 
 func TestMissingContainer(t *testing.T) {
+	log.SetLevel(log.DebugLevel)
 	ss := initStorages(t, 2)
 	defer ss[0].Destroy()
 

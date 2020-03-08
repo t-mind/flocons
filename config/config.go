@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 
+	. "github.com/docker/go-units"
+
 	. "github.com/t-mind/flocons/error"
 )
 
@@ -25,8 +27,11 @@ type Config struct {
 		Shard           string `json:"shard"`
 	} `json:"node"`
 	Storage struct {
-		Path    string `json:"path"`
-		MaxSize string `json:"max_size"`
+		Path                   string `json:"path"`
+		MaxSize                string `json:"max_size"`
+		MaxContainerSize       string `json:"max_container_size"`
+		MaxSizeInByes          int64
+		MaxContainerSizeInByes int64
 	} `json:"storage"`
 	Sync struct {
 		DataTimeout     string `json:"data_timeout"`
@@ -120,6 +125,11 @@ func sanitizeConfig(config *Config) error {
 			config.Node.Shard = "shard-1"
 		}
 
+		config.Storage.MaxSizeInByes, _ = FromHumanSize(config.Storage.MaxSize)
+		config.Storage.MaxContainerSizeInByes, _ = FromHumanSize(config.Storage.MaxContainerSize)
+		if config.Storage.MaxContainerSizeInByes == -1 {
+			config.Storage.MaxContainerSizeInByes, _ = FromHumanSize("100MB")
+		}
 	}
 
 	return nil
