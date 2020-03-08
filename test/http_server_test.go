@@ -44,7 +44,7 @@ func createServerAndClient(t *testing.T, number int, zookeeper *mock.Zookeeper, 
 		}
 	}
 
-	server, err := http.NewServer(config, storage, cluster.NewClientWithZookeperClientFactory(config, zookeeper.GetFactory(), dispatcher))
+	server, err := http.NewServer(config, storage, cluster.NewTopologyClientWithZookeperClientFactory(config, zookeeper.GetFactory(), dispatcher))
 	if err != nil {
 		t.Errorf("Could instantiate server: %s", err)
 		storage.Destroy()

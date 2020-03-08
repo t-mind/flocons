@@ -100,13 +100,14 @@ func fileInfoToHeader(fi os.FileInfo, h http.Header) {
 	mode &= ^((uint32)(os.ModeType))
 
 	h.Set(CONTENT_MODE, strconv.FormatUint((uint64)(mode), 8))
-	h.Set(LAST_MODIFIED, strconv.FormatInt(fi.ModTime().Unix(), 10))
+	h.Set(LAST_MODIFIED, fi.ModTime().UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT"))
 	if fi.Mode().IsDir() {
 		h.Set(CONTENT_TYPE, file.DIRECTORY_MIME_TYPE)
+		h.Set(CONTENT_LENGTH, "0")
 	} else {
 		h.Set(CONTENT_TYPE, mime.TypeByExtension(filepath.Ext(fi.Name())))
+		h.Set(CONTENT_LENGTH, strconv.FormatInt(fi.Size(), 10))
 	}
-	h.Set(CONTENT_LENGTH, strconv.FormatInt(fi.Size(), 10))
 }
 
 func filesInfoToCsv(files []os.FileInfo) ([]byte, error) {

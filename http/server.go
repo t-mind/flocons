@@ -194,6 +194,7 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path[len(FILES_PREFIX):]
 	fi, err := s.storage.GetFile(p)
 	if err != nil {
+		logger.Debugf("File %s not found try to redirect the request\n", p)
 		// We didn't find the file, maybe it is not still synchronized but
 		// if it was created, it is certainly on the node reponsible for it
 		// let's try to dispatch the request
@@ -204,6 +205,7 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 	}
 	var data []byte
 	if fi.Mode().IsRegular() {
+		logger.Debugf("Read regular file %s\n", p)
 		storageFileInfo, _ := fi.(*file.FileInfo)
 		data, err = storageFileInfo.Data()
 		if err != nil {
@@ -215,11 +217,13 @@ func (s *Server) GetFileWithData(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
+		logger.Debugf("Read directory %s\n", p)
 		files, err := s.storage.ReadDir(p)
 		if err != nil {
 			returnError(err, w)
 			return
 		}
+		logger.Debugf("Directory %s contains %v\n", p, files)
 		data, err = filesInfoToCsv(files)
 		if err != nil {
 			returnError(err, w)

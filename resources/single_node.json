@@ -1,0 +1,8 @@
+{
+  "node": {
+    "name": "localhost"
+  },
+  "storage": {
+    "path": "/tmp/coucou"
+  }
+}

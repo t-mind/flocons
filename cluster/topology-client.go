@@ -33,15 +33,25 @@ type topologyClient struct {
 	cancel          context.CancelFunc
 }
 
+type singleNodeTopologyClient struct {
+	currentNodeName string
+}
+
 type ZookeeperClientFactory func(servers []string, sessionTimeout time.Duration) (ZookeeperClient, <-chan zk.Event, error)
 
-func NewClient(config *config.Config, dispatcher Dispatcher) TopologyClient {
-	return NewClientWithZookeperClientFactory(config, func(servers []string, sessionTimeout time.Duration) (ZookeeperClient, <-chan zk.Event, error) {
+func NewTopologyClient(config *config.Config, dispatcher Dispatcher) TopologyClient {
+	return NewTopologyClientWithZookeperClientFactory(config, func(servers []string, sessionTimeout time.Duration) (ZookeeperClient, <-chan zk.Event, error) {
 		return zk.Connect(servers, time.Second)
 	}, dispatcher)
 }
 
-func NewClientWithZookeperClientFactory(config *config.Config, factory ZookeeperClientFactory, dispatcher Dispatcher) TopologyClient {
+func NewSingleTopologyNodeClient(config *config.Config) TopologyClient {
+	return &singleNodeTopologyClient{
+		currentNodeName: config.Node.Name,
+	}
+}
+
+func NewTopologyClientWithZookeperClientFactory(config *config.Config, factory ZookeeperClientFactory, dispatcher Dispatcher) TopologyClient {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	client := topologyClient{
@@ -274,6 +284,26 @@ func (c *topologyClient) Close() {
 	}
 	c.cancel()
 }
+
+func (c *singleNodeTopologyClient) Nodes() map[string]*NodeInfo {
+	nodes := make(map[string]*NodeInfo)
+	nodes[c.currentNodeName] = &NodeInfo{
+		Name:    c.currentNodeName,
+		Address: "localhost",
+		Shard:   "shard-1",
+	}
+	return nodes
+}
+
+func (c *singleNodeTopologyClient) GetNodeForObject(p string) *NodeInfo {
+	return &NodeInfo{
+		Name:    c.currentNodeName,
+		Address: "localhost",
+		Shard:   "shard-1",
+	}
+}
+
+func (c *singleNodeTopologyClient) Close() {}
 
 type NodeInfo struct {
 	Name    string `json:"name"`

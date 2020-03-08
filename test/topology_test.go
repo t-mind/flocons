@@ -33,7 +33,7 @@ func TestMultipleTopologyClients(t *testing.T) {
 	paths := make([]string, numClients)
 	pathCreated := make([]bool, numClients)
 	for i := 0; i < numClients; i++ {
-		clients[i] = cluster.NewClientWithZookeperClientFactory(createConfig(t, i), zookeeper.GetFactory(), &mock.NullDispatcher{})
+		clients[i] = cluster.NewTopologyClientWithZookeperClientFactory(createConfig(t, i), zookeeper.GetFactory(), &mock.NullDispatcher{})
 		defer clients[i].Close()
 		paths[i] = fmt.Sprintf("/flocons/test/node-%d", i)
 	}
