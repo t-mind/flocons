@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/macq/flocons/config"
-	. "github.com/macq/flocons/error"
-	"github.com/macq/flocons/file"
+	"github.com/t-mind/flocons/config"
+	. "github.com/t-mind/flocons/error"
+	"github.com/t-mind/flocons/file"
 )
 
 var containerRegexp, _ = regexp.Compile(`^files_(([^_]+)_([^_]+)_v([0-9]+)_([0-9]+)).tar$`)

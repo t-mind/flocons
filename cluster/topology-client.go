@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/macq/flocons/config"
 	"github.com/samuel/go-zookeeper/zk"
+	"github.com/t-mind/flocons/config"
 )
 
 const RETRY_TIMEOUT time.Duration = 5000 * time.Millisecond

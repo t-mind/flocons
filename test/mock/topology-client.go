@@ -1,6 +1,6 @@
 package mock
 
-import "github.com/macq/flocons/cluster"
+import "github.com/t-mind/flocons/cluster"
 
 type NullTopologyClient struct{}
 

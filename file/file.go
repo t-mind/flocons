@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	. "github.com/macq/flocons/error"
+	. "github.com/t-mind/flocons/error"
 )
 
 type FileDataSource struct {

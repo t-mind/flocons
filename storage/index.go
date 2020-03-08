@@ -3,8 +3,8 @@ package storage
 import (
 	"encoding/csv"
 
-	"github.com/macq/flocons/config"
-	"github.com/macq/flocons/file"
+	"github.com/t-mind/flocons/config"
+	"github.com/t-mind/flocons/file"
 
 	"fmt"
 	"io"
@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/macq/flocons/error"
+	. "github.com/t-mind/flocons/error"
 )
 
 var indexRegexp, _ = regexp.Compile(`^index_(([^_]+)_([^_]+)_v([0-9]+)_([0-9]+)).csv$`)

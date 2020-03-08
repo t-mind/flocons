@@ -8,10 +8,10 @@ import (
 
 	"github.com/samuel/go-zookeeper/zk"
 
-	"github.com/macq/flocons/cluster"
-	"github.com/macq/flocons/config"
-	"github.com/macq/flocons/test/mock"
 	log "github.com/sirupsen/logrus"
+	"github.com/t-mind/flocons/cluster"
+	"github.com/t-mind/flocons/config"
+	"github.com/t-mind/flocons/test/mock"
 )
 
 func createConfig(t *testing.T, number int) *config.Config {

@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/macq/flocons/config"
+	"github.com/t-mind/flocons/config"
 )
 
 func TestEmptyConfig(t *testing.T) {

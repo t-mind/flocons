@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strconv"
 
-	. "github.com/macq/flocons/error"
+	. "github.com/t-mind/flocons/error"
 )
 
 const DEFAULT_PORT int = 62116

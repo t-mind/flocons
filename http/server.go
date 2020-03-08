@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/macq/flocons/cluster"
-	"github.com/macq/flocons/config"
-	. "github.com/macq/flocons/error"
-	"github.com/macq/flocons/file"
-	"github.com/macq/flocons/storage"
+	"github.com/t-mind/flocons/cluster"
+	"github.com/t-mind/flocons/config"
+	. "github.com/t-mind/flocons/error"
+	"github.com/t-mind/flocons/file"
+	"github.com/t-mind/flocons/storage"
 )
 
 const FILE_WORKER_POOL_SIZE int = 10

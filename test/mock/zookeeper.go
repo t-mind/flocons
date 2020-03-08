@@ -4,8 +4,8 @@ import (
 	"path"
 	"time"
 
-	"github.com/macq/flocons/cluster"
 	"github.com/samuel/go-zookeeper/zk"
+	"github.com/t-mind/flocons/cluster"
 )
 
 type Zookeeper struct {

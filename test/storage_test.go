@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/macq/flocons/config"
-	"github.com/macq/flocons/storage"
+	"github.com/t-mind/flocons/config"
+	"github.com/t-mind/flocons/storage"
 )
 
 func initStorages(t *testing.T, count int) []*storage.Storage {

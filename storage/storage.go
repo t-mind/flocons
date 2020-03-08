@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/macq/flocons/config"
-	. "github.com/macq/flocons/error"
+	"github.com/t-mind/flocons/config"
+	. "github.com/t-mind/flocons/error"
 
 	"github.com/golang/groupcache/lru"
 )

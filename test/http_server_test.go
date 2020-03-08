@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/macq/flocons/cluster"
-	"github.com/macq/flocons/config"
-	"github.com/macq/flocons/http"
-	"github.com/macq/flocons/storage"
-	"github.com/macq/flocons/test/mock"
 	log "github.com/sirupsen/logrus"
+	"github.com/t-mind/flocons/cluster"
+	"github.com/t-mind/flocons/config"
+	"github.com/t-mind/flocons/http"
+	"github.com/t-mind/flocons/storage"
+	"github.com/t-mind/flocons/test/mock"
 )
 
 func createServerAndClient(t *testing.T, number int, zookeeper *mock.Zookeeper, trueDispatcher bool) (*http.Server, *http.Client, *storage.Storage) {

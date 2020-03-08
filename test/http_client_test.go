@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/macq/flocons/storage"
-	"github.com/macq/flocons/test/mock"
+	"github.com/t-mind/flocons/storage"
+	"github.com/t-mind/flocons/test/mock"
 
-	"github.com/macq/flocons/config"
-	"github.com/macq/flocons/http"
+	"github.com/t-mind/flocons/config"
+	"github.com/t-mind/flocons/http"
 )
 
 func initServer(t *testing.T) *http.Server {
